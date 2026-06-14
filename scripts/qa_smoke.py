@@ -1,77 +1,273 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import requests
 
 BASE = "http://localhost:18000"
 HEADERS = {"X-User-Email": f"qa-{int(time.time())}@example.com"}
+MARKER = "contextsmithqamarker"
 
 
 def request(method: str, path: str, expected: int, **kwargs):
-    response = requests.request(method, f"{BASE}{path}", timeout=10, **kwargs)
+    response = requests.request(method, f"{BASE}{path}", timeout=15, **kwargs)
     if response.status_code != expected:
-        print(f"{method} {path} expected {expected}, got {response.status_code}: {response.text}", file=sys.stderr)
+        print(
+            f"{method} {path} expected {expected}, got {response.status_code}: {response.text}",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
     return response.json() if response.content else None
+
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def build_git_fixture(ts: int) -> tuple[str, str]:
+    """Create a tiny git repo mounted into the worker container for QA smoke."""
+    if shutil.which("git") is None:
+        fail("git executable is required for QA smoke git ingestion")
+    host_root = Path("tmp/qa-git-fixtures").resolve()
+    host_root.mkdir(parents=True, exist_ok=True)
+    repo_name = f"smoke-repo-{ts}"
+    repo_path = host_root / repo_name
+    bundle_path = host_root / f"{repo_name}.bundle"
+    if repo_path.exists():
+        shutil.rmtree(repo_path)
+    if bundle_path.exists():
+        bundle_path.unlink()
+    repo_path.mkdir(parents=True)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "qa",
+        "GIT_AUTHOR_EMAIL": "qa@example.com",
+        "GIT_COMMITTER_NAME": "qa",
+        "GIT_COMMITTER_EMAIL": "qa@example.com",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q", str(repo_path)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (repo_path / "README.md").write_text(
+        "# QA Git Repo\n\nThe quokkasmoke marker proves git ingestion through RQ.\n",
+        encoding="utf-8",
+    )
+    (repo_path / "node_modules").mkdir()
+    (repo_path / "node_modules" / "ignored.js").write_text("ignoredsmoke", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo_path), "add", "-A"], env=env, check=True)
+    subprocess.run(
+        ["git", "-C", str(repo_path), "commit", "-q", "-m", "qa smoke"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(repo_path), "bundle", "create", str(bundle_path), "--all"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return f"/qa-fixtures/{bundle_path.name}", commit
+
+
+def wait_for_index_run(ws: str, run_id: str) -> dict:
+    deadline = time.time() + 90
+    current = {"status": "queued"}
+    while time.time() < deadline:
+        current = request("GET", f"/workspaces/{ws}/index-runs/{run_id}", 200, headers=HEADERS)
+        if current["status"] in {"succeeded", "failed"}:
+            break
+        time.sleep(2)
+    if current["status"] != "succeeded":
+        fail(f"index run did not succeed: {current}")
+    if current["documents_seen"] < 1 or current["chunks_created"] < 1:
+        fail(f"index run produced no chunks: {current}")
+    return current
 
 
 def main() -> None:
     ts = int(time.time() * 1000)
     workspace = request("POST", "/workspaces", 201, json={"name": "QA", "slug": f"qa-{ts}"}, headers=HEADERS)
+    ws = workspace["id"]
     project = request(
         "POST",
-        f"/workspaces/{workspace['id']}/projects",
+        f"/workspaces/{ws}/projects",
         201,
         json={"name": "ContextSmith QA", "description": "smoke"},
         headers=HEADERS,
     )
+    proj = project["id"]
+    content = (
+        "# QA Runbook\n\n"
+        "ContextSmith QA verifies resource ingestion and lexical search. "
+        f"The unique marker {MARKER} appears exactly once in this document.\n"
+    )
     resource = request(
         "POST",
-        f"/workspaces/{workspace['id']}/projects/{project['id']}/resources",
+        f"/workspaces/{ws}/projects/{proj}/resources",
         201,
-        json={"type": "markdown", "name": "QA Runbook", "uri": "file://qa.md"},
+        json={
+            "type": "markdown",
+            "name": "QA Runbook",
+            "uri": "doc://qa-runbook",
+            "source_config": {"content": content},
+        },
         headers=HEADERS,
     )
+    res = resource["id"]
+
     run = request(
         "POST",
-        f"/workspaces/{workspace['id']}/projects/{project['id']}/resources/{resource['id']}/refresh",
+        f"/workspaces/{ws}/projects/{proj}/resources/{res}/refresh",
         202,
         headers=HEADERS,
     )
-    deadline = time.time() + 60
-    status = run["status"]
-    while time.time() < deadline:
-        current = request("GET", f"/workspaces/{workspace['id']}/index-runs/{run['id']}", 200, headers=HEADERS)
-        status = current["status"]
-        if status in {"succeeded", "failed"}:
-            break
-        time.sleep(2)
-    if status != "succeeded":
-        print(f"index run did not succeed: {status}", file=sys.stderr)
-        raise SystemExit(1)
-    audit_events = request("GET", f"/workspaces/{workspace['id']}/audit-events", 200, headers=HEADERS)
+    wait_for_index_run(ws, run["id"])
+
+    # Snapshot version/commit/hash is visible.
+    snapshots = request(
+        "GET",
+        f"/workspaces/{ws}/projects/{proj}/resources/{res}/snapshots",
+        200,
+        headers=HEADERS,
+    )
+    if not snapshots or not snapshots[0]["version"] or not snapshots[0]["is_current"]:
+        fail(f"snapshot version/current missing: {snapshots}")
+
+    # Per-resource index run log/status is queryable.
+    resource_runs = request(
+        "GET",
+        f"/workspaces/{ws}/projects/{proj}/resources/{res}/index-runs",
+        200,
+        headers=HEADERS,
+    )
+    if not any(r["status"] == "succeeded" for r in resource_runs):
+        fail(f"no succeeded index run for resource: {resource_runs}")
+
+    # Lexical search returns the chunk with citation metadata.
+    search = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/search",
+        200,
+        json={"query": MARKER},
+        headers=HEADERS,
+    )
+    if search["count"] < 1:
+        fail(f"search returned no hits for marker: {search}")
+    hit = search["hits"][0]
+    if hit["resource_id"] != res:
+        fail(f"search hit resource mismatch: {hit}")
+    for field in ("snapshot_id", "version", "ordinal", "content_hash"):
+        if hit.get(field) in (None, ""):
+            fail(f"search hit missing citation field {field!r}: {hit}")
+    if MARKER not in hit["snippet"].lower():
+        fail(f"snippet missing marker: {hit}")
+
+    # Negative search returns nothing.
+    empty = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/search",
+        200,
+        json={"query": "zzzznomatchzzzz"},
+        headers=HEADERS,
+    )
+    if empty["count"] != 0:
+        fail(f"negative search should be empty: {empty}")
+
+    # Git repo ingestion also goes through the real API -> Redis/RQ worker -> DB path.
+    git_uri, git_commit = build_git_fixture(ts)
+    git_resource = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/resources",
+        201,
+        json={
+            "type": "git",
+            "name": "QA Git Repo",
+            "uri": git_uri,
+            "source_config": {},
+        },
+        headers=HEADERS,
+    )
+    git_res = git_resource["id"]
+    git_run = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/resources/{git_res}/refresh",
+        202,
+        headers=HEADERS,
+    )
+    wait_for_index_run(ws, git_run["id"])
+    git_snapshots = request(
+        "GET",
+        f"/workspaces/{ws}/projects/{proj}/resources/{git_res}/snapshots",
+        200,
+        headers=HEADERS,
+    )
+    if not git_snapshots or git_snapshots[0]["version"] != git_commit:
+        fail(f"git snapshot commit mismatch: expected {git_commit}, got {git_snapshots}")
+    git_search = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/search",
+        200,
+        json={"query": "quokkasmoke", "resource_ids": [git_res]},
+        headers=HEADERS,
+    )
+    if git_search["count"] < 1 or git_search["hits"][0].get("commit") != git_commit:
+        fail(f"git search/citation failed: {git_search}")
+
+    # Audit trail covers the mutating actions.
+    audit_events = request("GET", f"/workspaces/{ws}/audit-events", 200, headers=HEADERS)
     actions = {event["action"] for event in audit_events}
     required_actions = {"workspace.create", "project.create", "resource.create", "resource.refresh"}
     missing_actions = required_actions - actions
     if missing_actions:
-        print(f"missing audit actions: {sorted(missing_actions)}", file=sys.stderr)
-        raise SystemExit(1)
+        fail(f"missing audit actions: {sorted(missing_actions)}")
+
+    # Auth denial: intruder cannot read the project or run search.
     denied = requests.get(
-        f"{BASE}/workspaces/{workspace['id']}/projects/{project['id']}",
+        f"{BASE}/workspaces/{ws}/projects/{proj}",
         headers={"X-User-Email": "intruder@example.com"},
-        timeout=10,
+        timeout=15,
     )
     if denied.status_code != 404:
-        print(f"unauthorized read should 404, got {denied.status_code}: {denied.text}", file=sys.stderr)
-        raise SystemExit(1)
-    web = requests.get("http://localhost:13000/api/health", timeout=10)
+        fail(f"unauthorized read should 404, got {denied.status_code}: {denied.text}")
+    denied_search = requests.post(
+        f"{BASE}/workspaces/{ws}/projects/{proj}/search",
+        json={"query": MARKER},
+        headers={"X-User-Email": "intruder@example.com"},
+        timeout=15,
+    )
+    if denied_search.status_code != 404:
+        fail(f"unauthorized search should 404, got {denied_search.status_code}: {denied_search.text}")
+
+    # Frontend health is reachable in the composed stack.
+    web = requests.get("http://localhost:13000/api/health", timeout=15)
     if web.status_code != 200:
-        print(f"frontend health failed: {web.status_code} {web.text}", file=sys.stderr)
-        raise SystemExit(1)
+        fail(f"frontend health failed: {web.status_code} {web.text}")
+
     print(
-        "QA smoke passed: workspace/project/resource refresh flow, audit events, RQ worker, auth denial, frontend health"
+        "QA smoke passed: document+git ingestion → snapshots → chunks → lexical search with citations, "
+        "index-run logs, audit events, RQ worker, auth denial (read+search), frontend health"
     )
 
 
