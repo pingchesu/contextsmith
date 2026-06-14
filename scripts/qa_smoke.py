@@ -298,6 +298,41 @@ def main() -> None:
     if code_hit["name"] != "smoke_symbol" or code_hit.get("commit") != git_commit:
         fail(f"code symbol citation failed: {code_search}")
 
+    agent_context = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/agent-context",
+        200,
+        json={"query": "smoke_symbol", "runtime": "hermes", "resource_ids": [git_res], "top_k": 5},
+        headers=HEADERS,
+    )
+    if "Hermes specialist agent" not in agent_context["instruction"] or not agent_context["citations"]:
+        fail(f"agent context missing runtime instruction/citations: {agent_context}")
+    if not any(symbol["name"] == "smoke_symbol" for symbol in agent_context.get("symbols", [])):
+        fail(f"agent context missing code symbol: {agent_context}")
+    mcp_tools = request(
+        "POST",
+        f"/mcp/{ws}/{proj}",
+        200,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers=HEADERS,
+    )
+    if mcp_tools["result"]["tools"][0]["name"] != "contextsmith.get_agent_context":
+        fail(f"MCP tools/list missing context tool: {mcp_tools}")
+    mcp_call = request(
+        "POST",
+        f"/mcp/{ws}/{proj}",
+        200,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "contextsmith.get_agent_context", "arguments": {"query": "smoke_symbol", "runtime": "codex"}},
+        },
+        headers=HEADERS,
+    )
+    if mcp_call["result"]["structuredContent"]["runtime"] != "codex":
+        fail(f"MCP tools/call failed: {mcp_call}")
+
     # Audit trail covers the mutating actions.
     audit_events = request("GET", f"/workspaces/{ws}/audit-events", 200, headers=HEADERS)
     actions = {event["action"] for event in audit_events}
@@ -330,7 +365,7 @@ def main() -> None:
 
     print(
         "QA smoke passed: document+git ingestion → snapshots → chunks → embeddings → code symbols → lexical/hybrid context retrieval with citations, "
-        "query/resource usage analytics, review lifecycle, index-run logs, audit events, RQ worker, auth denial (read+search), frontend health"
+        "query/resource usage analytics, review lifecycle, agent-context API, central MCP context tool, index-run logs, audit events, RQ worker, auth denial (read+search), frontend health"
     )
 
 

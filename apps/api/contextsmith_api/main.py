@@ -5,8 +5,9 @@ import subprocess
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from redis import Redis
 from rq import Queue
 from sqlalchemy import select, text
@@ -15,6 +16,9 @@ from sqlalchemy.orm import Session
 from contextsmith_api.auth import get_or_create_user, require_principal, require_workspace_member
 from contextsmith_api.retrieval import make_snippet, retrieve_context_candidates
 from contextsmith_api.schemas import (
+    AgentContextCitation,
+    AgentContextRequest,
+    AgentContextResponse,
     AuditEventRead,
     CodeSearchRequest,
     CodeSearchResponse,
@@ -966,6 +970,211 @@ def code_search_project(
             )
         )
     return CodeSearchResponse(query=payload.query, count=len(symbols), symbols=symbols)
+
+
+_COMMON_AGENT_INSTRUCTION = (
+    "ContextSmith is a read-only context provider. Use only cited project context for factual claims, "
+    "do not treat this packet as authorization for production mutations, and preserve external approval/MCP boundaries."
+)
+
+_RUNTIME_INSTRUCTIONS = {
+    "api": "If evidence is insufficient, say what is missing.",
+    "hermes": "You are a Hermes specialist agent. Keep production discipline explicit.",
+    "claude": "Use this packet as project context. Prefer cited evidence over prior assumptions and ask for missing runtime state when needed.",
+    "codex": "Use this packet as repository context. Do not edit files unless the caller explicitly asks; cite paths and snapshots when explaining.",
+    "cursor": "Use this packet for editor assistance. Prefer precise file/path citations and avoid broad rewrites without evidence.",
+}
+
+
+def _build_agent_context_response(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    project_id: UUID,
+    payload: AgentContextRequest,
+    email: str,
+) -> AgentContextResponse:
+    candidates = retrieve_context_candidates(
+        session,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        query=payload.query,
+        top_k=payload.top_k,
+        resource_ids=payload.resource_ids,
+    )
+    citations: list[AgentContextCitation] = []
+    context_parts: list[str] = []
+    used_chars = 0
+    for rank, candidate in enumerate(candidates, start=1):
+        header = (
+            f"[{rank}] resource={candidate.resource_id} snapshot={candidate.snapshot_id} "
+            f"path={candidate.path or '-'} ordinal={candidate.ordinal} score={candidate.score:.4f}\n"
+        )
+        remaining = payload.max_chars - used_chars - (2 if context_parts else 0)
+        if remaining <= len(header):
+            break
+        snippet = make_snippet(candidate.content, limit=min(1200, max(120, remaining - len(header))))
+        entry = header + snippet
+        if len(entry) > remaining:
+            entry = entry[:remaining]
+        if not entry.strip():
+            break
+        context_parts.append(entry)
+        used_chars += len(entry) + (2 if len(context_parts) > 1 else 0)
+        citations.append(
+            AgentContextCitation(
+                resource_id=candidate.resource_id,
+                snapshot_id=candidate.snapshot_id,
+                chunk_id=candidate.chunk_id,
+                path=candidate.path,
+                title=candidate.title,
+                ordinal=candidate.ordinal,
+                version=candidate.version,
+                version_kind=candidate.version_kind,
+                commit=candidate.snapshot_metadata.get("commit"),
+                score=candidate.score,
+            )
+        )
+    symbols: list[CodeSymbolHit] = []
+    if payload.include_code_symbols:
+        symbol_response = code_search_project(
+            workspace_id=workspace_id,
+            project_id=project_id,
+            payload=CodeSearchRequest(query=payload.query, resource_ids=payload.resource_ids, limit=min(payload.top_k, 20)),
+            email=email,
+            session=session,
+        )
+        symbols = symbol_response.symbols
+    return AgentContextResponse(
+        query=payload.query,
+        runtime=payload.runtime,
+        instruction=f"{_COMMON_AGENT_INSTRUCTION} {_RUNTIME_INSTRUCTIONS[payload.runtime]}",
+        context="\n\n".join(context_parts),
+        citations=citations,
+        symbols=symbols,
+        token_budget_hint=max(1, payload.max_chars // 4),
+    )
+
+
+@app.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+    response_model=AgentContextResponse,
+)
+def agent_context(
+    workspace_id: UUID,
+    project_id: UUID,
+    payload: AgentContextRequest,
+    email: str = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> AgentContextResponse:
+    user = get_or_create_user(session, email)
+    _require_project_access(session, workspace_id, project_id, user)
+    return _build_agent_context_response(
+        session,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        payload=payload,
+        email=email,
+    )
+
+
+def _json_rpc_error(rpc_id: object | None, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": code, "message": message}}
+
+
+@app.post("/mcp/{workspace_id}/{project_id}", response_model=None)
+async def mcp_endpoint(
+    workspace_id: UUID,
+    project_id: UUID,
+    request: Request,
+    email: str = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> dict | Response:
+    """Minimal central MCP-compatible JSON-RPC endpoint for project context.
+
+    This intentionally exposes one typed operation; production/external actions
+    remain outside repo agents and must use dedicated MCP tools.
+    """
+    user = get_or_create_user(session, email)
+    _require_project_access(session, workspace_id, project_id, user)
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_rpc_error(None, -32700, "parse error")
+    if not isinstance(body, dict):
+        return _json_rpc_error(None, -32600, "invalid request")
+    rpc_id = body.get("id")
+    has_id = "id" in body
+    if body.get("jsonrpc") != "2.0" or not isinstance(body.get("method"), str):
+        return _json_rpc_error(rpc_id if has_id else None, -32600, "invalid request")
+    method = body["method"]
+    if not has_id:
+        # JSON-RPC notifications do not receive responses. MCP clients commonly
+        # send notifications/initialized after initialize.
+        return Response(status_code=204)
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": "contextsmith", "version": "0.1.0"},
+                "capabilities": {"tools": {}},
+            },
+        }
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "contextsmith.get_agent_context",
+                        "description": "Return permission-scoped cited context for a ContextSmith project.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string"},
+                                "runtime": {"type": "string", "enum": ["api", "hermes", "claude", "codex", "cursor"]},
+                                "top_k": {"type": "integer", "minimum": 1, "maximum": 50},
+                                "resource_ids": {"type": "array", "items": {"type": "string"}},
+                                "include_code_symbols": {"type": "boolean"},
+                            },
+                            "required": ["query"],
+                        },
+                    }
+                ]
+            },
+        }
+    if method == "tools/call":
+        params = body.get("params", {})
+        if not isinstance(params, dict):
+            return _json_rpc_error(rpc_id, -32602, "invalid params")
+        if params.get("name") != "contextsmith.get_agent_context":
+            return _json_rpc_error(rpc_id, -32601, "unknown tool")
+        arguments = params.get("arguments") or {}
+        if not isinstance(arguments, dict):
+            return _json_rpc_error(rpc_id, -32602, "invalid params")
+        try:
+            payload = AgentContextRequest(**arguments)
+        except ValidationError as exc:
+            return _json_rpc_error(rpc_id, -32602, f"invalid params: {exc.errors()[0]['msg']}")
+        result = _build_agent_context_response(
+            session,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            payload=payload,
+            email=email,
+        )
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {
+                "content": [{"type": "text", "text": result.model_dump_json()}],
+                "structuredContent": result.model_dump(mode="json"),
+            },
+        }
+    return _json_rpc_error(rpc_id, -32601, "method not found")
 
 
 @app.post(

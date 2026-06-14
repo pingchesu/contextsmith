@@ -40,6 +40,8 @@ See [`docs/MILESTONE-4.md`](docs/MILESTONE-4.md) for deterministic code symbol e
 
 See [`docs/MILESTONE-5.md`](docs/MILESTONE-5.md) for resource review, lifecycle cleanup, freshness, and usage analytics.
 
+See [`docs/MILESTONE-6.md`](docs/MILESTONE-6.md) for agent-context API packets and the central MCP context tool.
+
 ## Initial scope
 
 ContextSmith is planned as an open-source SaaS-scale platform with the following first-class capabilities:
@@ -56,7 +58,7 @@ ContextSmith is planned as an open-source SaaS-scale platform with the following
 
 ## Status
 
-Milestones 1–4 are merged on `main`; Milestone 5 is implemented on the active feature branch pending review/verification/merge.
+Milestones 1–5 are merged on `main`; Milestone 6 is implemented on the active feature branch pending review/verification/merge.
 
 ## License
 

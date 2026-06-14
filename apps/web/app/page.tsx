@@ -73,6 +73,8 @@ const endpoints: Array<[string, string]> = [
   ['POST', '/workspaces/{ws}/projects/{proj}/search'],
   ['POST', '/workspaces/{ws}/projects/{proj}/context-packets'],
   ['POST', '/workspaces/{ws}/projects/{proj}/code-search'],
+  ['POST', '/workspaces/{ws}/projects/{proj}/agent-context'],
+  ['POST', '/mcp/{ws}/{proj}'],
   ['GET', '/workspaces/{ws}/projects/{proj}/resource-review'],
   ['GET', '/workspaces/{ws}/projects/{proj}/resource-usage'],
   ['POST', '/workspaces/{ws}/projects/{proj}/resources/{res}/review'],
