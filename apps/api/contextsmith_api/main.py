@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
@@ -12,8 +13,12 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from contextsmith_api.auth import get_or_create_user, require_principal, require_workspace_member
+from contextsmith_api.retrieval import make_snippet, retrieve_context_candidates
 from contextsmith_api.schemas import (
     AuditEventRead,
+    ContextPacketItemRead,
+    ContextPacketRead,
+    ContextPacketRequest,
     IndexRunRead,
     ProjectCreate,
     ProjectRead,
@@ -29,12 +34,17 @@ from contextsmith_api.schemas import (
 )
 from contextsmith_shared.config import get_settings
 from contextsmith_shared.db import get_session
+from contextsmith_shared.embeddings import DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_PROVIDER
 from contextsmith_shared.models import (
     AuditEvent,
+    ContextPacket,
+    ContextPacketItem,
     IndexRun,
     Project,
     ProjectMembership,
+    QueryRun,
     Resource,
+    RetrievalHit,
     SourceSnapshot,
     Workspace,
     WorkspaceMembership,
@@ -565,3 +575,168 @@ def search_project(
             )
         )
     return SearchResponse(query=payload.query, count=len(hits), hits=hits)
+
+
+@app.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/context-packets",
+    response_model=ContextPacketRead,
+    status_code=201,
+)
+def create_context_packet(
+    workspace_id: UUID,
+    project_id: UUID,
+    payload: ContextPacketRequest,
+    email: str = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> ContextPacketRead:
+    """Build a cited context packet through permission-scoped hybrid retrieval."""
+    if payload.mode != "hybrid":
+        raise HTTPException(status_code=422, detail="only hybrid context packets are supported")
+    user = get_or_create_user(session, email)
+    _require_project_access(session, workspace_id, project_id, user)
+
+    query_run = QueryRun(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        actor_user_id=user.id,
+        query=payload.query,
+        mode=payload.mode,
+        top_k=payload.top_k,
+        provider=DEFAULT_EMBEDDING_PROVIDER,
+        model=DEFAULT_EMBEDDING_MODEL,
+        status="running",
+        meta={"resource_ids": [str(rid) for rid in payload.resource_ids or []]},
+    )
+    session.add(query_run)
+    session.commit()
+    query_run_id = query_run.id
+
+    try:
+        candidates = retrieve_context_candidates(
+            session,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            query=payload.query,
+            top_k=payload.top_k,
+            resource_ids=payload.resource_ids,
+        )
+        packet = ContextPacket(
+            workspace_id=workspace_id,
+            project_id=project_id,
+            query_run_id=query_run_id,
+            status="succeeded",
+            item_count=len(candidates),
+            meta={"builder": "m3-hybrid-context-packet"},
+        )
+        session.add(packet)
+        session.flush()
+
+        items: list[ContextPacketItemRead] = []
+        for rank, candidate in enumerate(candidates, start=1):
+            citation = {
+                "resource_id": str(candidate.resource_id),
+                "snapshot_id": str(candidate.snapshot_id),
+                "chunk_id": str(candidate.chunk_id),
+                "path": candidate.path,
+                "title": candidate.title,
+                "ordinal": candidate.ordinal,
+                "content_hash": candidate.content_hash,
+                "version": candidate.version,
+                "version_kind": candidate.version_kind,
+                "commit": candidate.snapshot_metadata.get("commit"),
+            }
+            hit = RetrievalHit(
+                workspace_id=workspace_id,
+                project_id=project_id,
+                query_run_id=query_run_id,
+                resource_id=candidate.resource_id,
+                source_snapshot_id=candidate.snapshot_id,
+                chunk_id=candidate.chunk_id,
+                rank=rank,
+                lexical_score=candidate.lexical_score,
+                vector_score=candidate.vector_score,
+                rerank_score=candidate.rerank_score,
+                score=candidate.score,
+                meta={"path": candidate.path, "content_hash": candidate.content_hash},
+            )
+            session.add(hit)
+            session.flush()
+            snippet = make_snippet(candidate.content)
+            session.add(
+                ContextPacketItem(
+                    workspace_id=workspace_id,
+                    project_id=project_id,
+                    context_packet_id=packet.id,
+                    retrieval_hit_id=hit.id,
+                    resource_id=candidate.resource_id,
+                    source_snapshot_id=candidate.snapshot_id,
+                    chunk_id=candidate.chunk_id,
+                    rank=rank,
+                    citation=citation,
+                    snippet=snippet,
+                    score=candidate.score,
+                )
+            )
+            items.append(
+                ContextPacketItemRead(
+                    rank=rank,
+                    resource_id=candidate.resource_id,
+                    snapshot_id=candidate.snapshot_id,
+                    chunk_id=candidate.chunk_id,
+                    path=candidate.path,
+                    title=candidate.title,
+                    ordinal=candidate.ordinal,
+                    content_hash=candidate.content_hash,
+                    version=candidate.version,
+                    version_kind=candidate.version_kind,
+                    commit=candidate.snapshot_metadata.get("commit"),
+                    snippet=snippet,
+                    score=candidate.score,
+                    lexical_score=candidate.lexical_score,
+                    vector_score=candidate.vector_score,
+                    rerank_score=candidate.rerank_score,
+                    citation=citation,
+                )
+            )
+
+        query_run = session.get(QueryRun, query_run_id)
+        if query_run is None:
+            raise RuntimeError("query_run disappeared during context packet build")
+        query_run.status = "succeeded"
+        query_run.hit_count = len(candidates)
+        query_run.finished_at = datetime.now(UTC)
+        session.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                actor_user_id=user.id,
+                action="context_packet.create",
+                target_type="context_packet",
+                target_id=packet.id,
+                meta={"query_run_id": str(query_run_id), "hit_count": len(candidates)},
+            )
+        )
+        session.commit()
+        return ContextPacketRead(
+            id=packet.id,
+            query_run_id=query_run_id,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            query=payload.query,
+            mode=payload.mode,
+            provider=DEFAULT_EMBEDDING_PROVIDER,
+            model=DEFAULT_EMBEDDING_MODEL,
+            count=len(items),
+            items=items,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        session.rollback()
+        failed = session.get(QueryRun, query_run_id)
+        if failed is not None:
+            failed.status = "failed"
+            failed.finished_at = datetime.now(UTC)
+            failed.meta = {**(failed.meta or {}), "error": str(exc)[:500]}
+            session.add(failed)
+            session.commit()
+        raise HTTPException(status_code=500, detail="context packet retrieval failed") from exc

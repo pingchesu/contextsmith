@@ -30,8 +30,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from contextsmith_shared.embeddings import (
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_PROVIDER,
+    EMBEDDING_DIMENSIONS,
+    embed_text,
+    vector_literal,
+)
 from contextsmith_shared.models import Chunk, IndexRun, Resource, SourceSnapshot
 
 # --- configuration ---------------------------------------------------------
@@ -562,6 +570,35 @@ def _collect_git(resource: Resource) -> tuple[list[dict], str, str, dict]:
 
 # --- orchestration ---------------------------------------------------------
 
+def _store_chunk_embedding(session: Session, chunk: Chunk) -> None:
+    session.execute(
+        text(
+            """
+            INSERT INTO chunk_embeddings (
+                id, workspace_id, project_id, resource_id, source_snapshot_id,
+                chunk_id, provider, model, dimensions, content_hash, embedding
+            ) VALUES (
+                gen_random_uuid(), CAST(:workspace_id AS uuid), CAST(:project_id AS uuid),
+                CAST(:resource_id AS uuid), CAST(:snapshot_id AS uuid), CAST(:chunk_id AS uuid),
+                :provider, :model, :dimensions, :content_hash, CAST(:embedding AS vector)
+            )
+            """
+        ),
+        {
+            "workspace_id": str(chunk.workspace_id),
+            "project_id": str(chunk.project_id),
+            "resource_id": str(chunk.resource_id),
+            "snapshot_id": str(chunk.source_snapshot_id),
+            "chunk_id": str(chunk.id),
+            "provider": DEFAULT_EMBEDDING_PROVIDER,
+            "model": DEFAULT_EMBEDDING_MODEL,
+            "dimensions": EMBEDDING_DIMENSIONS,
+            "content_hash": chunk.content_hash,
+            "embedding": vector_literal(embed_text(chunk.content)),
+        },
+    )
+
+
 def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> SourceSnapshot:
     """Produce a snapshot and chunks for ``resource`` within ``run``.
 
@@ -607,26 +644,28 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
         for ordinal, piece in enumerate(iter_chunks(doc["content"])):
             if chunks_created >= max_chunks:
                 raise RuntimeError(f"chunk budget exceeded for resource {resource.id}")
-            session.add(
-                Chunk(
-                    workspace_id=resource.workspace_id,
-                    project_id=resource.project_id,
-                    resource_id=resource.id,
-                    source_snapshot_id=snapshot.id,
-                    path=doc.get("path"),
-                    title=doc.get("title"),
-                    content=piece,
-                    ordinal=ordinal,
-                    content_hash=content_hash(piece),
-                    meta=doc.get("meta", {}),
-                )
+            chunk = Chunk(
+                workspace_id=resource.workspace_id,
+                project_id=resource.project_id,
+                resource_id=resource.id,
+                source_snapshot_id=snapshot.id,
+                path=doc.get("path"),
+                title=doc.get("title"),
+                content=piece,
+                ordinal=ordinal,
+                content_hash=content_hash(piece),
+                meta=doc.get("meta", {}),
             )
+            session.add(chunk)
+            session.flush()
+            _store_chunk_embedding(session, chunk)
             chunks_created += 1
 
     snapshot.status = "succeeded"
     snapshot.indexed_at = datetime.now(UTC)
     run.documents_seen = len(docs)
     run.chunks_created = chunks_created
+    run.embeddings_created = chunks_created
     resource.current_snapshot_id = snapshot.id
     resource.status = "active"
     return snapshot

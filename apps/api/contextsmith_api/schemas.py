@@ -126,3 +126,43 @@ class SearchResponse(BaseModel):
     query: str
     count: int
     hits: list[SearchHit]
+
+
+class ContextPacketRequest(BaseModel):
+    query: str = Field(min_length=1)
+    resource_ids: list[UUID] | None = None
+    top_k: int = Field(default=8, ge=1, le=50)
+    mode: str = "hybrid"
+
+
+class ContextPacketItemRead(BaseModel):
+    rank: int
+    resource_id: UUID
+    snapshot_id: UUID
+    chunk_id: UUID
+    path: str | None = None
+    title: str | None = None
+    ordinal: int
+    content_hash: str
+    version: str
+    version_kind: str
+    commit: str | None = None
+    snippet: str
+    score: float
+    lexical_score: float
+    vector_score: float
+    rerank_score: float
+    citation: dict = Field(default_factory=dict)
+
+
+class ContextPacketRead(BaseModel):
+    id: UUID
+    query_run_id: UUID
+    workspace_id: UUID
+    project_id: UUID
+    query: str
+    mode: str
+    provider: str
+    model: str
+    count: int
+    items: list[ContextPacketItemRead]

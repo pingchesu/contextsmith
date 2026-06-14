@@ -5,6 +5,7 @@ import { useState } from 'react';
 interface SearchHit {
   resource_id: string;
   snapshot_id: string;
+  chunk_id?: string;
   path: string | null;
   title: string | null;
   ordinal: number;
@@ -14,12 +15,23 @@ interface SearchHit {
   commit: string | null;
   snippet: string;
   score: number;
+  lexical_score?: number;
+  vector_score?: number;
+  rerank_score?: number;
 }
 
 interface SearchResponse {
   query: string;
   count: number;
   hits: SearchHit[];
+}
+
+interface ContextPacketResponse {
+  id: string;
+  query_run_id: string;
+  query: string;
+  count: number;
+  items: SearchHit[];
 }
 
 const DEFAULT_API =
@@ -59,6 +71,7 @@ const endpoints: Array<[string, string]> = [
   ['GET', '/workspaces/{ws}/projects/{proj}/resources/{res}/snapshots'],
   ['GET', '/workspaces/{ws}/projects/{proj}/resources/{res}/index-runs'],
   ['POST', '/workspaces/{ws}/projects/{proj}/search'],
+  ['POST', '/workspaces/{ws}/projects/{proj}/context-packets'],
 ];
 
 export default function Home() {
@@ -78,7 +91,7 @@ export default function Home() {
     setHits([]);
     try {
       const res = await fetch(
-        `${api}/workspaces/${workspaceId}/projects/${projectId}/search`,
+        `${api}/workspaces/${workspaceId}/projects/${projectId}/context-packets`,
         {
           method: 'POST',
           headers: {
@@ -89,12 +102,14 @@ export default function Home() {
         },
       );
       if (!res.ok) {
-        setStatus(`Search failed: HTTP ${res.status}`);
+        setStatus(`Context packet failed: HTTP ${res.status}`);
         return;
       }
-      const data: SearchResponse = await res.json();
-      setHits(data.hits);
-      setStatus(`${data.count} result${data.count === 1 ? '' : 's'} for “${data.query}”`);
+      const data: ContextPacketResponse = await res.json();
+      setHits(data.items);
+      setStatus(
+        `${data.count} cited context item${data.count === 1 ? '' : 's'} for “${data.query}” · packet ${data.id.slice(0, 8)}`,
+      );
     } catch (err) {
       setStatus(`Request error: ${String(err)}`);
     } finally {
@@ -138,16 +153,16 @@ export default function Home() {
 
       <section style={{ padding: '3rem 3rem 1.5rem', maxWidth: '980px' }}>
         <p style={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.16em' }}>
-          Milestone 2 · Resource Ingestion &amp; Lexical Search
+          Milestone 3 · Hybrid Retrieval &amp; Context Packets
         </p>
         <h1 style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', lineHeight: 1.05, margin: '0 0 1rem' }}>
-          Add resources, snapshot them, search the text.
+          Build versioned resources, then retrieve cited context packets.
         </h1>
         <p style={{ color: '#334155', fontSize: '1.1rem', lineHeight: 1.7, maxWidth: '760px' }}>
           Add a markdown/document resource (inline content) or a public/local git repository, run a
-          manual refresh, and the worker produces a versioned source snapshot plus lexical chunks.
-          Search returns chunk snippets with citations — resource, snapshot, path/title, ordinal, and
-          commit/hash version.
+          manual refresh, and the worker produces a versioned source snapshot, lexical chunks, and
+          deterministic dev embeddings. The context packet endpoint combines lexical/vector retrieval
+          with a small rerank signal and returns cited snippets plus analytics IDs.
         </p>
       </section>
 
@@ -161,8 +176,8 @@ export default function Home() {
           alignItems: 'start',
         }}
       >
-        <form style={panel} onSubmit={runSearch} aria-label="Project lexical search">
-          <h2 style={{ marginTop: 0 }}>Search a project</h2>
+        <form style={panel} onSubmit={runSearch} aria-label="Project context packet retrieval">
+          <h2 style={{ marginTop: 0 }}>Retrieve a context packet</h2>
           <div style={{ display: 'grid', gap: '0.9rem' }}>
             <div style={{ display: 'grid', gap: '0.9rem', gridTemplateColumns: '1fr 1fr' }}>
               <div>
@@ -201,7 +216,7 @@ export default function Home() {
                 cursor: loading ? 'default' : 'pointer',
               }}
             >
-              {loading ? 'Searching…' : 'Search'}
+              {loading ? 'Retrieving…' : 'Build context packet'}
             </button>
           </div>
 
@@ -223,6 +238,9 @@ export default function Home() {
                 <div style={{ color: '#64748b', fontSize: '0.8rem', fontFamily: 'ui-monospace, monospace' }}>
                   {hit.path ? `path=${hit.path} · ` : ''}ordinal={hit.ordinal} · {hit.version_kind}=
                   {(hit.commit || hit.version).slice(0, 12)}
+                  {hit.vector_score !== undefined
+                    ? ` · lex=${(hit.lexical_score ?? 0).toFixed(3)} vec=${hit.vector_score.toFixed(3)} rerank=${(hit.rerank_score ?? 0).toFixed(3)}`
+                    : ''}
                 </div>
               </article>
             ))}
