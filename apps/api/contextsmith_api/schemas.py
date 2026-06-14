@@ -243,3 +243,35 @@ class CodeSearchResponse(BaseModel):
     query: str
     count: int
     symbols: list[CodeSymbolHit]
+
+
+class AgentContextRequest(BaseModel):
+    query: str = Field(min_length=1)
+    resource_ids: list[UUID] | None = None
+    top_k: int = Field(default=8, ge=1, le=50)
+    runtime: str = Field(default="api", pattern=r"^(api|hermes|claude|codex|cursor)$")
+    include_code_symbols: bool = True
+    max_chars: int = Field(default=12000, ge=1000, le=50000)
+
+
+class AgentContextCitation(BaseModel):
+    resource_id: UUID
+    snapshot_id: UUID
+    chunk_id: UUID
+    path: str | None = None
+    title: str | None = None
+    ordinal: int
+    version: str
+    version_kind: str
+    commit: str | None = None
+    score: float
+
+
+class AgentContextResponse(BaseModel):
+    query: str
+    runtime: str
+    instruction: str
+    context: str
+    citations: list[AgentContextCitation]
+    symbols: list[CodeSymbolHit] = Field(default_factory=list)
+    token_budget_hint: int
