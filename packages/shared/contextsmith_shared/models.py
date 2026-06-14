@@ -161,6 +161,71 @@ class IndexRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class QueryRun(Base):
+    __tablename__ = "query_runs"
+    id = uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str] = mapped_column(Text, nullable=False)
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RetrievalHit(Base):
+    __tablename__ = "retrieval_hits"
+    id = uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    query_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("query_runs.id"), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resources.id"), nullable=False)
+    source_snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source_snapshots.id"), nullable=False)
+    chunk_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    lexical_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    vector_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    rerank_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    score: Mapped[float] = mapped_column(nullable=False)
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContextPacket(Base):
+    __tablename__ = "context_packets"
+    id = uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    query_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("query_runs.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContextPacketItem(Base):
+    __tablename__ = "context_packet_items"
+    id = uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    context_packet_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("context_packets.id"), nullable=False)
+    retrieval_hit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("retrieval_hits.id"), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resources.id"), nullable=False)
+    source_snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source_snapshots.id"), nullable=False)
+    chunk_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    citation: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    snippet: Mapped[str] = mapped_column(Text, nullable=False)
+    score: Mapped[float] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id = uuid_pk()

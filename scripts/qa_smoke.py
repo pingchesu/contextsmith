@@ -103,6 +103,8 @@ def wait_for_index_run(ws: str, run_id: str) -> dict:
         fail(f"index run did not succeed: {current}")
     if current["documents_seen"] < 1 or current["chunks_created"] < 1:
         fail(f"index run produced no chunks: {current}")
+    if current.get("embeddings_created", 0) < 1:
+        fail(f"index run produced no embeddings: {current}")
     return current
 
 
@@ -183,6 +185,22 @@ def main() -> None:
             fail(f"search hit missing citation field {field!r}: {hit}")
     if MARKER not in hit["snippet"].lower():
         fail(f"snippet missing marker: {hit}")
+
+    # M3 hybrid context packet returns cited chunks and query/hit analytics IDs.
+    packet = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/context-packets",
+        201,
+        json={"query": f"lexical vector rerank {MARKER}", "resource_ids": [res], "top_k": 5},
+        headers=HEADERS,
+    )
+    if packet["count"] < 1 or not packet.get("id") or not packet.get("query_run_id"):
+        fail(f"context packet missing items or analytics ids: {packet}")
+    packet_item = packet["items"][0]
+    if packet_item["resource_id"] != res or packet_item["citation"]["resource_id"] != res:
+        fail(f"context packet citation mismatch: {packet_item}")
+    if packet_item.get("vector_score", 0) == 0:
+        fail(f"context packet missing vector score: {packet_item}")
 
     # Negative search returns nothing.
     empty = request(
@@ -266,8 +284,8 @@ def main() -> None:
         fail(f"frontend health failed: {web.status_code} {web.text}")
 
     print(
-        "QA smoke passed: document+git ingestion → snapshots → chunks → lexical search with citations, "
-        "index-run logs, audit events, RQ worker, auth denial (read+search), frontend health"
+        "QA smoke passed: document+git ingestion → snapshots → chunks → embeddings → lexical/hybrid context retrieval with citations, "
+        "query analytics, index-run logs, audit events, RQ worker, auth denial (read+search), frontend health"
     )
 
 
