@@ -5,6 +5,7 @@ import subprocess
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
 from rq import Queue
 from sqlalchemy import select, text
@@ -41,6 +42,14 @@ from contextsmith_shared.models import (
 
 app = FastAPI(title="ContextSmith API", version="0.1.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:13000", "http://127.0.0.1:13000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 def run_migrations_if_requested() -> None:
     if os.getenv("CONTEXTSMITH_AUTO_MIGRATE", "false").lower() == "true":
@@ -69,6 +78,40 @@ def _resolve_project(session: Session, workspace_id: UUID, project_id: UUID) -> 
         select(Project).where(Project.id == project_id, Project.workspace_id == workspace_id)
     )
     if project is None or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return project
+
+
+def _require_project_access(session: Session, workspace_id: UUID, project_id: UUID, user) -> Project:
+    """Resolve a project and enforce visibility/membership for reads/search."""
+    require_workspace_member(session, workspace_id, user)
+    project = _resolve_project(session, workspace_id, project_id)
+    if project.visibility in {"workspace", "public"}:
+        return project
+    membership = session.scalar(
+        select(ProjectMembership).where(
+            ProjectMembership.workspace_id == workspace_id,
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == user.id,
+        )
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return project
+
+
+def _require_project_member(session: Session, workspace_id: UUID, project_id: UUID, user) -> Project:
+    """Resolve a project and require explicit project membership for mutations."""
+    require_workspace_member(session, workspace_id, user)
+    project = _resolve_project(session, workspace_id, project_id)
+    membership = session.scalar(
+        select(ProjectMembership).where(
+            ProjectMembership.workspace_id == workspace_id,
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == user.id,
+        )
+    )
+    if membership is None:
         raise HTTPException(status_code=404, detail="project not found")
     return project
 
@@ -172,13 +215,7 @@ def get_project(
     session: Session = Depends(get_session),
 ) -> Project:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
-    project = session.scalar(
-        select(Project).where(Project.id == project_id, Project.workspace_id == workspace_id)
-    )
-    if project is None or project.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="project not found")
-    return project
+    return _require_project_access(session, workspace_id, project_id, user)
 
 
 @app.post(
@@ -194,12 +231,7 @@ def create_resource(
     session: Session = Depends(get_session),
 ) -> Resource:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
-    project = session.scalar(
-        select(Project).where(Project.id == project_id, Project.workspace_id == workspace_id)
-    )
-    if project is None:
-        raise HTTPException(status_code=404, detail="project not found")
+    _require_project_member(session, workspace_id, project_id, user)
     resource = Resource(
         workspace_id=workspace_id,
         project_id=project_id,
@@ -237,17 +269,8 @@ def get_resource(
     session: Session = Depends(get_session),
 ) -> Resource:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
-    resource = session.scalar(
-        select(Resource).where(
-            Resource.id == resource_id,
-            Resource.project_id == project_id,
-            Resource.workspace_id == workspace_id,
-        )
-    )
-    if resource is None or resource.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="resource not found")
-    return resource
+    _require_project_access(session, workspace_id, project_id, user)
+    return _resolve_resource(session, workspace_id, project_id, resource_id)
 
 
 @app.post(
@@ -264,22 +287,14 @@ def refresh_resource(
     session: Session = Depends(get_session),
 ) -> IndexRun:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
-    resource = session.scalar(
-        select(Resource).where(
-            Resource.id == resource_id,
-            Resource.project_id == project_id,
-            Resource.workspace_id == workspace_id,
-        )
-    )
-    if resource is None:
-        raise HTTPException(status_code=404, detail="resource not found")
+    _require_project_member(session, workspace_id, project_id, user)
+    resource = _resolve_resource(session, workspace_id, project_id, resource_id)
     run = IndexRun(
         workspace_id=workspace_id,
         project_id=project_id,
         resource_id=resource_id,
         trigger="manual",
-        status="queued",
+        status="enqueueing",
         meta={"fail": fail},
     )
     session.add(run)
@@ -296,7 +311,17 @@ def refresh_resource(
     )
     session.commit()
     queue = Queue("default", connection=Redis.from_url(get_settings().redis_url))
-    queue.enqueue("contextsmith_worker.jobs.run_index", str(run.id), job_timeout=600)
+    try:
+        queue.enqueue("contextsmith_worker.jobs.run_index", str(run.id), job_timeout=600)
+    except Exception as exc:
+        run.status = "failed"
+        run.error_message = f"failed to enqueue index job: {exc}"[:1000]
+        session.add(run)
+        session.commit()
+        raise HTTPException(status_code=503, detail="failed to enqueue index job") from exc
+    run.status = "queued"
+    session.add(run)
+    session.commit()
     return run
 
 
@@ -331,6 +356,7 @@ def get_index_run(
     )
     if run is None:
         raise HTTPException(status_code=404, detail="index run not found")
+    _require_project_access(session, workspace_id, run.project_id, user)
     return run
 
 
@@ -347,10 +373,13 @@ def update_resource(
     session: Session = Depends(get_session),
 ) -> Resource:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
+    _require_project_member(session, workspace_id, project_id, user)
     resource = _resolve_resource(session, workspace_id, project_id, resource_id)
     fields = payload.model_dump(exclude_unset=True)
+    nullable_rejected = {"name", "uri", "update_frequency", "source_config"}
     for key, value in fields.items():
+        if key in nullable_rejected and value is None:
+            raise HTTPException(status_code=422, detail=f"{key} cannot be null")
         setattr(resource, key, value)
     session.add(
         AuditEvent(
@@ -377,8 +406,7 @@ def list_resources(
     session: Session = Depends(get_session),
 ) -> list[Resource]:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
-    _resolve_project(session, workspace_id, project_id)
+    _require_project_access(session, workspace_id, project_id, user)
     return list(
         session.scalars(
             select(Resource)
@@ -404,7 +432,7 @@ def list_snapshots(
     session: Session = Depends(get_session),
 ) -> list[SnapshotRead]:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
+    _require_project_access(session, workspace_id, project_id, user)
     resource = _resolve_resource(session, workspace_id, project_id, resource_id)
     snapshots = session.scalars(
         select(SourceSnapshot)
@@ -445,7 +473,7 @@ def list_resource_index_runs(
     session: Session = Depends(get_session),
 ) -> list[IndexRun]:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
+    _require_project_access(session, workspace_id, project_id, user)
     _resolve_resource(session, workspace_id, project_id, resource_id)
     return list(
         session.scalars(
@@ -478,8 +506,7 @@ def search_project(
     session: Session = Depends(get_session),
 ) -> SearchResponse:
     user = get_or_create_user(session, email)
-    require_workspace_member(session, workspace_id, user)
-    _resolve_project(session, workspace_id, project_id)
+    _require_project_access(session, workspace_id, project_id, user)
 
     resource_clause = ""
     params: dict = {

@@ -5,10 +5,12 @@ import os
 import pytest
 
 from contextsmith_worker.ingestion import (
+    _coerce_documents,
     chunk_text,
     content_hash,
     is_text_file,
     iter_repo_files,
+    sanitize_remote_url,
     should_index_path,
     validate_git_url,
 )
@@ -72,14 +74,16 @@ def test_should_index_path_skips_generated_and_binary() -> None:
     assert should_index_path("package-lock.json") is False
 
 
-def test_validate_git_url_accepts_https_and_local() -> None:
+def test_validate_git_url_accepts_https_and_local_only_when_enabled() -> None:
     assert validate_git_url("https://github.com/org/repo.git") == (
         False,
         "https://github.com/org/repo.git",
     )
-    assert validate_git_url("file:///tmp/repo") == (True, "/tmp/repo")
-    assert validate_git_url("/abs/path/repo") == (True, "/abs/path/repo")
-    is_local, target = validate_git_url("./rel/repo")
+    with pytest.raises(ValueError):
+        validate_git_url("file:///tmp/repo")
+    assert validate_git_url("file:///tmp/repo", allow_local=True) == (True, "file:///tmp/repo")
+    assert validate_git_url("/abs/path/repo", allow_local=True) == (True, "/abs/path/repo")
+    is_local, target = validate_git_url("./rel/repo", allow_local=True)
     assert is_local is True
     assert target.endswith("rel/repo")
 
@@ -102,6 +106,25 @@ def test_validate_git_url_rejects_unsafe(bad: str) -> None:
     with pytest.raises(ValueError):
         validate_git_url(bad)
 
+
+def test_validate_git_url_rejects_internal_https_hosts() -> None:
+    with pytest.raises(ValueError):
+        validate_git_url("https://localhost/repo.git")
+    with pytest.raises(ValueError):
+        validate_git_url("https://127.0.0.1/repo.git")
+
+
+def test_sanitize_remote_url_strips_credentials_and_query() -> None:
+    assert (
+        sanitize_remote_url("https://token:secret@example.com/org/repo.git?access_token=x#frag")
+        == "https://example.com/org/repo.git"
+    )
+    assert sanitize_remote_url("/qa-fixtures/repo.bundle") == "local"
+
+
+def test_coerce_documents_rejects_oversized_inline_content() -> None:
+    with pytest.raises(RuntimeError, match="max_document_bytes"):
+        _coerce_documents({"content": "x" * 11}, max_document_bytes=10)
 
 def test_iter_repo_files_filters_and_is_deterministic(tmp_path) -> None:
     (tmp_path / "README.md").write_text("hello quokka", encoding="utf-8")

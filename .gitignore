@@ -21,6 +21,7 @@ build/
 uploads/
 artifacts/
 indexes/
+tmp/
 *.db
 *.sqlite
 *.sqlite3

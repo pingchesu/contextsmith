@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import requests
 
@@ -24,6 +28,82 @@ def request(method: str, path: str, expected: int, **kwargs):
 def fail(message: str) -> None:
     print(message, file=sys.stderr)
     raise SystemExit(1)
+
+
+def build_git_fixture(ts: int) -> tuple[str, str]:
+    """Create a tiny git repo mounted into the worker container for QA smoke."""
+    if shutil.which("git") is None:
+        fail("git executable is required for QA smoke git ingestion")
+    host_root = Path("tmp/qa-git-fixtures").resolve()
+    host_root.mkdir(parents=True, exist_ok=True)
+    repo_name = f"smoke-repo-{ts}"
+    repo_path = host_root / repo_name
+    bundle_path = host_root / f"{repo_name}.bundle"
+    if repo_path.exists():
+        shutil.rmtree(repo_path)
+    if bundle_path.exists():
+        bundle_path.unlink()
+    repo_path.mkdir(parents=True)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "qa",
+        "GIT_AUTHOR_EMAIL": "qa@example.com",
+        "GIT_COMMITTER_NAME": "qa",
+        "GIT_COMMITTER_EMAIL": "qa@example.com",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q", str(repo_path)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (repo_path / "README.md").write_text(
+        "# QA Git Repo\n\nThe quokkasmoke marker proves git ingestion through RQ.\n",
+        encoding="utf-8",
+    )
+    (repo_path / "node_modules").mkdir()
+    (repo_path / "node_modules" / "ignored.js").write_text("ignoredsmoke", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo_path), "add", "-A"], env=env, check=True)
+    subprocess.run(
+        ["git", "-C", str(repo_path), "commit", "-q", "-m", "qa smoke"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(repo_path), "bundle", "create", str(bundle_path), "--all"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return f"/qa-fixtures/{bundle_path.name}", commit
+
+
+def wait_for_index_run(ws: str, run_id: str) -> dict:
+    deadline = time.time() + 90
+    current = {"status": "queued"}
+    while time.time() < deadline:
+        current = request("GET", f"/workspaces/{ws}/index-runs/{run_id}", 200, headers=HEADERS)
+        if current["status"] in {"succeeded", "failed"}:
+            break
+        time.sleep(2)
+    if current["status"] != "succeeded":
+        fail(f"index run did not succeed: {current}")
+    if current["documents_seen"] < 1 or current["chunks_created"] < 1:
+        fail(f"index run produced no chunks: {current}")
+    return current
 
 
 def main() -> None:
@@ -63,18 +143,7 @@ def main() -> None:
         202,
         headers=HEADERS,
     )
-    deadline = time.time() + 90
-    status = run["status"]
-    while time.time() < deadline:
-        current = request("GET", f"/workspaces/{ws}/index-runs/{run['id']}", 200, headers=HEADERS)
-        status = current["status"]
-        if status in {"succeeded", "failed"}:
-            break
-        time.sleep(2)
-    if status != "succeeded":
-        fail(f"index run did not succeed: {status}")
-    if current["documents_seen"] < 1 or current["chunks_created"] < 1:
-        fail(f"index run produced no chunks: {current}")
+    wait_for_index_run(ws, run["id"])
 
     # Snapshot version/commit/hash is visible.
     snapshots = request(
@@ -126,6 +195,46 @@ def main() -> None:
     if empty["count"] != 0:
         fail(f"negative search should be empty: {empty}")
 
+    # Git repo ingestion also goes through the real API -> Redis/RQ worker -> DB path.
+    git_uri, git_commit = build_git_fixture(ts)
+    git_resource = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/resources",
+        201,
+        json={
+            "type": "git",
+            "name": "QA Git Repo",
+            "uri": git_uri,
+            "source_config": {},
+        },
+        headers=HEADERS,
+    )
+    git_res = git_resource["id"]
+    git_run = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/resources/{git_res}/refresh",
+        202,
+        headers=HEADERS,
+    )
+    wait_for_index_run(ws, git_run["id"])
+    git_snapshots = request(
+        "GET",
+        f"/workspaces/{ws}/projects/{proj}/resources/{git_res}/snapshots",
+        200,
+        headers=HEADERS,
+    )
+    if not git_snapshots or git_snapshots[0]["version"] != git_commit:
+        fail(f"git snapshot commit mismatch: expected {git_commit}, got {git_snapshots}")
+    git_search = request(
+        "POST",
+        f"/workspaces/{ws}/projects/{proj}/search",
+        200,
+        json={"query": "quokkasmoke", "resource_ids": [git_res]},
+        headers=HEADERS,
+    )
+    if git_search["count"] < 1 or git_search["hits"][0].get("commit") != git_commit:
+        fail(f"git search/citation failed: {git_search}")
+
     # Audit trail covers the mutating actions.
     audit_events = request("GET", f"/workspaces/{ws}/audit-events", 200, headers=HEADERS)
     actions = {event["action"] for event in audit_events}
@@ -157,7 +266,7 @@ def main() -> None:
         fail(f"frontend health failed: {web.status_code} {web.text}")
 
     print(
-        "QA smoke passed: ingestion → snapshot → chunks → lexical search with citations, "
+        "QA smoke passed: document+git ingestion → snapshots → chunks → lexical search with citations, "
         "index-run logs, audit events, RQ worker, auth denial (read+search), frontend health"
     )
 

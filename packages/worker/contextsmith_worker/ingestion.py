@@ -18,15 +18,17 @@ database or network state so they can be unit tested directly.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
@@ -36,6 +38,14 @@ from contextsmith_shared.models import Chunk, IndexRun, Resource, SourceSnapshot
 
 DEFAULT_MAX_FILE_BYTES = 1_000_000
 HARD_MAX_FILE_BYTES = 5_000_000
+DEFAULT_MAX_REPO_FILES = 1_000
+HARD_MAX_REPO_FILES = 5_000
+DEFAULT_MAX_REPO_BYTES = 20_000_000
+HARD_MAX_REPO_BYTES = 100_000_000
+DEFAULT_MAX_DOCUMENT_BYTES = 5_000_000
+HARD_MAX_DOCUMENT_BYTES = 20_000_000
+DEFAULT_MAX_CHUNKS = 5_000
+HARD_MAX_CHUNKS = 20_000
 DEFAULT_MAX_CHARS = 2_000
 DEFAULT_OVERLAP = 200
 DEFAULT_CLONE_TIMEOUT = 120
@@ -114,25 +124,19 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def chunk_text(
+def iter_chunks(
     content: str,
     *,
     max_chars: int = DEFAULT_MAX_CHARS,
     overlap: int = DEFAULT_OVERLAP,
-) -> list[str]:
-    """Split ``content`` into overlapping chunks at natural boundaries.
-
-    Deterministic and boundary-aware: it prefers to break on paragraph, then
-    line, then word boundaries within the trailing half of each window so chunks
-    stay readable. Whitespace-only input yields an empty list.
-    """
+) -> Iterator[str]:
+    """Yield overlapping chunks at natural boundaries without materializing all chunks."""
     if not content or not content.strip():
-        return []
+        return
     if max_chars <= 0:
         raise ValueError("max_chars must be positive")
     overlap = max(0, min(overlap, max_chars - 1))
 
-    chunks: list[str] = []
     n = len(content)
     start = 0
     while start < n:
@@ -146,11 +150,20 @@ def chunk_text(
                     break
         piece = content[start:end].strip()
         if piece:
-            chunks.append(piece)
+            yield piece
         if end >= n:
             break
         start = max(end - overlap, start + 1)
-    return chunks
+
+
+def chunk_text(
+    content: str,
+    *,
+    max_chars: int = DEFAULT_MAX_CHARS,
+    overlap: int = DEFAULT_OVERLAP,
+) -> list[str]:
+    """Split ``content`` into overlapping chunks at natural boundaries."""
+    return list(iter_chunks(content, max_chars=max_chars, overlap=overlap))
 
 
 def is_text_file(data: bytes) -> bool:
@@ -185,7 +198,60 @@ def should_index_path(relpath: str) -> bool:
     return True
 
 
-def validate_git_url(url: str) -> tuple[bool, str]:
+def sanitize_remote_url(url: str) -> str:
+    """Return a non-secret URL suitable for snapshot metadata.
+
+    Userinfo, query, fragment, and params may carry tokens; keep only scheme,
+    host, optional port, and path for operator-facing citations.
+    """
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return "local"
+    host = parsed.hostname or ""
+    netloc = host
+    if parsed.port is not None:
+        netloc = f"{host}:{parsed.port}"
+    return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+
+
+def _is_public_ip(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def validate_public_https_host(hostname: str) -> None:
+    """Reject localhost/private/internal egress targets before invoking git.
+
+    This is a preflight guard, not a complete network sandbox; deployments should
+    still run workers with egress controls.
+    """
+    lowered = hostname.lower().rstrip(".")
+    if lowered in {"localhost", "localhost.localdomain"} or lowered.endswith(".local"):
+        raise ValueError("git host must be public")
+    try:
+        if not _is_public_ip(lowered):
+            raise ValueError("git host must be public")
+        return
+    except ValueError as exc:
+        if str(exc) == "git host must be public":
+            raise
+    try:
+        infos = socket.getaddrinfo(lowered, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ValueError(f"git host DNS resolution failed: {lowered}") from exc
+    addresses = {info[4][0] for info in infos}
+    if not addresses or any(not _is_public_ip(address) for address in addresses):
+        raise ValueError("git host must resolve only to public IPs")
+
+
+def validate_git_url(url: str, *, allow_local: bool = False) -> tuple[bool, str]:
     """Validate and classify a git source URL.
 
     Returns ``(is_local, target)`` where ``target`` is the URL/path to hand to
@@ -209,15 +275,20 @@ def validate_git_url(url: str) -> tuple[bool, str]:
     parsed = urlparse(candidate)
     scheme = parsed.scheme.lower()
     if scheme == "https":
-        if not parsed.netloc:
+        if not parsed.netloc or not parsed.hostname:
             raise ValueError("https git url missing host")
+        validate_public_https_host(parsed.hostname)
         return (False, candidate)
     if scheme == "file":
+        if not allow_local:
+            raise ValueError("local git paths are disabled")
         path = candidate[len("file://") :]
         if not path:
             raise ValueError("file git url missing path")
-        return (True, path)
+        return (True, candidate)
     if scheme == "" and candidate.startswith(("/", "./", "../", "~")):
+        if not allow_local:
+            raise ValueError("local git paths are disabled")
         return (True, os.path.expanduser(candidate))
     raise ValueError(f"unsupported git url scheme: {scheme or 'none'}")
 
@@ -226,25 +297,30 @@ def iter_repo_files(
     root: str | os.PathLike[str],
     *,
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    max_files: int = DEFAULT_MAX_REPO_FILES,
+    max_total_bytes: int = DEFAULT_MAX_REPO_BYTES,
 ) -> Iterator[tuple[str, str]]:
     """Yield ``(relpath, text)`` for indexable text files under ``root``.
 
     Skips generated/dependency directories, binary and oversized files, and
     symlinks. Every yielded file is verified to resolve inside ``root`` so a
-    symlink cannot leak host files outside the clone. Output is sorted by path
-    for deterministic snapshots/ordinals.
+    symlink cannot leak host files outside the clone. File count and byte budgets
+    prevent attacker-controlled repos from exhausting worker memory/DB/disk.
     """
     root_path = Path(root).resolve()
-    collected: list[tuple[str, str]] = []
+    files_seen = 0
+    total_bytes = 0
     for dirpath, dirnames, filenames in os.walk(root_path):
         # Prune skip dirs and symlinked dirs in place (os.walk does not follow
         # symlinks by default, but we drop the entries to be explicit).
-        dirnames[:] = [
+        dirnames[:] = sorted(
             d
             for d in dirnames
             if d not in SKIP_DIRS and not os.path.islink(os.path.join(dirpath, d))
-        ]
-        for name in filenames:
+        )
+        for name in sorted(filenames):
+            if files_seen >= max_files:
+                return
             full = Path(dirpath) / name
             if full.is_symlink():
                 continue
@@ -258,16 +334,17 @@ def iter_repo_files(
             if not should_index_path(rel):
                 continue
             try:
-                if full.stat().st_size > max_file_bytes:
+                size = full.stat().st_size
+                if size > max_file_bytes or total_bytes + size > max_total_bytes:
                     continue
                 data = full.read_bytes()
             except OSError:
                 continue
             if not is_text_file(data):
                 continue
-            collected.append((rel, data.decode("utf-8")))
-    collected.sort(key=lambda item: item[0])
-    yield from collected
+            files_seen += 1
+            total_bytes += size
+            yield rel, data.decode("utf-8")
 
 
 # --- git plumbing ----------------------------------------------------------
@@ -277,6 +354,7 @@ def _git_env() -> dict[str, str]:
     env.update(
         {
             "GIT_TERMINAL_PROMPT": "0",
+            "GIT_LFS_SKIP_SMUDGE": "1",
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_ASKPASS": os.devnull,
@@ -294,9 +372,18 @@ def clone_repo(
     *,
     branch: str | None = None,
     timeout: int = DEFAULT_CLONE_TIMEOUT,
+    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
 ) -> None:
     """Clone ``target`` into ``dest`` with hooks disabled and no code execution."""
-    args = ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "protocol.ext.allow=never"]
+    args = [
+        "git",
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "protocol.ext.allow=never",
+        "-c",
+        "safe.directory=*",
+    ]
     args += ["-c", f"protocol.file.allow={'always' if is_local else 'never'}"]
     args += [
         "clone",
@@ -305,6 +392,7 @@ def clone_repo(
         "--single-branch",
         "--no-tags",
         "--no-recurse-submodules",
+        f"--filter=blob:limit={max_file_bytes}",
         "--quiet",
     ]
     if branch:
@@ -349,7 +437,13 @@ def _work_base() -> str:
 
 # --- document model --------------------------------------------------------
 
-def _coerce_documents(source_config: dict) -> list[dict]:
+def _bounded_text(content: str, *, limit: int, label: str) -> str:
+    if len(content.encode("utf-8")) > limit:
+        raise RuntimeError(f"{label} exceeds max_document_bytes")
+    return content
+
+
+def _coerce_documents(source_config: dict, *, max_document_bytes: int) -> list[dict]:
     """Extract inline documents from a document resource's source_config."""
     docs: list[dict] = []
     raw_docs = source_config.get("documents")
@@ -364,7 +458,7 @@ def _coerce_documents(source_config: dict) -> list[dict]:
                 {
                     "path": entry.get("path") or entry.get("title"),
                     "title": entry.get("title") or entry.get("path"),
-                    "content": content,
+                    "content": _bounded_text(content, limit=max_document_bytes, label="document"),
                     "meta": {"source": "document"},
                 }
             )
@@ -381,7 +475,7 @@ def _coerce_documents(source_config: dict) -> list[dict]:
             {
                 "path": source_config.get("path"),
                 "title": source_config.get("title"),
-                "content": content,
+                "content": _bounded_text(content, limit=max_document_bytes, label="document"),
                 "meta": {"source": "document"},
             }
         )
@@ -390,7 +484,11 @@ def _coerce_documents(source_config: dict) -> list[dict]:
 
 def _collect_documents(resource: Resource) -> tuple[list[dict], str, str, dict]:
     config = resource.source_config or {}
-    docs = _coerce_documents(config)
+    max_document_bytes = min(
+        int(config.get("max_document_bytes", DEFAULT_MAX_DOCUMENT_BYTES)),
+        HARD_MAX_DOCUMENT_BYTES,
+    )
+    docs = _coerce_documents(config, max_document_bytes=max_document_bytes)
     for doc in docs:
         if not doc.get("title"):
             doc["title"] = resource.name
@@ -402,6 +500,7 @@ def _collect_documents(resource: Resource) -> tuple[list[dict], str, str, dict]:
         "source": "document",
         "uri": resource.uri,
         "document_count": len(docs),
+        "max_document_bytes": max_document_bytes,
     }
     return docs, version, "content_hash", meta
 
@@ -414,11 +513,23 @@ def _collect_git(resource: Resource) -> tuple[list[dict], str, str, dict]:
         int(config.get("max_file_bytes", DEFAULT_MAX_FILE_BYTES)), HARD_MAX_FILE_BYTES
     )
     timeout = min(int(config.get("clone_timeout", DEFAULT_CLONE_TIMEOUT)), 600)
+    max_files = min(int(config.get("max_repo_files", DEFAULT_MAX_REPO_FILES)), HARD_MAX_REPO_FILES)
+    max_total_bytes = min(
+        int(config.get("max_repo_bytes", DEFAULT_MAX_REPO_BYTES)), HARD_MAX_REPO_BYTES
+    )
+    allow_local = os.getenv("CONTEXTSMITH_ALLOW_LOCAL_GIT", "false").lower() == "true"
 
-    is_local, target = validate_git_url(url)
+    is_local, target = validate_git_url(url, allow_local=allow_local)
     clone_dir = tempfile.mkdtemp(prefix="repo-", dir=_work_base())
     try:
-        clone_repo(target, is_local, clone_dir, branch=branch, timeout=timeout)
+        clone_repo(
+            target,
+            is_local,
+            clone_dir,
+            branch=branch,
+            timeout=timeout,
+            max_file_bytes=max_file_bytes,
+        )
         commit = get_commit_sha(clone_dir)
         docs = [
             {
@@ -427,17 +538,24 @@ def _collect_git(resource: Resource) -> tuple[list[dict], str, str, dict]:
                 "content": text,
                 "meta": {"source": "git", "path": rel, "commit": commit},
             }
-            for rel, text in iter_repo_files(clone_dir, max_file_bytes=max_file_bytes)
+            for rel, text in iter_repo_files(
+                clone_dir,
+                max_file_bytes=max_file_bytes,
+                max_files=max_files,
+                max_total_bytes=max_total_bytes,
+            )
         ]
     finally:
         shutil.rmtree(clone_dir, ignore_errors=True)
 
     meta = {
         "source": "git",
-        "remote_url": url,
+        "remote_url": sanitize_remote_url(url),
         "commit": commit,
         "branch": branch,
         "file_count": len(docs),
+        "max_files": max_files,
+        "max_total_bytes": max_total_bytes,
     }
     return docs, commit, "commit_sha", meta
 
@@ -480,10 +598,15 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
     snapshot.version_kind = version_kind
     snapshot.meta = meta
 
+    max_chunks = min(
+        int((resource.source_config or {}).get("max_chunks", DEFAULT_MAX_CHUNKS)),
+        HARD_MAX_CHUNKS,
+    )
     chunks_created = 0
     for doc in docs:
-        pieces = chunk_text(doc["content"])
-        for ordinal, piece in enumerate(pieces):
+        for ordinal, piece in enumerate(iter_chunks(doc["content"])):
+            if chunks_created >= max_chunks:
+                raise RuntimeError(f"chunk budget exceeded for resource {resource.id}")
             session.add(
                 Chunk(
                     workspace_id=resource.workspace_id,

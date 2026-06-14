@@ -55,6 +55,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://contextsmith:contextsmith@postgres:5432/contextsmith
       REDIS_URL: redis://redis:6379/0
+      CONTEXTSMITH_ALLOW_LOCAL_GIT: "true"
+    volumes:
+      - ./tmp/qa-git-fixtures:/qa-fixtures:ro
     depends_on:
       api:
         condition: service_healthy

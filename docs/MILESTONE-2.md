@@ -101,9 +101,22 @@ Unauthorized access returns `404` (non-leaking), consistent with M1 and SPEC §1
 - **Bounded & sandboxed git** — `--depth 1 --single-branch --no-tags
   --no-recurse-submodules`, hooks disabled (`core.hooksPath=/dev/null`), system &
   global config ignored, credential prompts disabled (`GIT_TERMINAL_PROMPT=0`),
-  and `GIT_ALLOW_PROTOCOL=https:file` plus `protocol.ext.allow=never`. Only
-  `https` and local `file://`/path sources are accepted; `ssh`, `git://`, and
-  remote-helper transports (`ext::`, `fd::`) are rejected.
+  and `GIT_ALLOW_PROTOCOL=https:file` plus `protocol.ext.allow=never`. `https`
+  remotes are accepted only when their host resolves to public IPs (local,
+  private, link-local, multicast, reserved, and `.local` names are rejected
+  before git runs). Workers should still run with deployment-level egress policy;
+  this is a preflight guard, not a complete network sandbox.
+- **Local sources gated** — local `file://`/path sources are disabled unless the
+  worker has `CONTEXTSMITH_ALLOW_LOCAL_GIT=true` (used only by local
+  development/QA Compose), so an untrusted SaaS user cannot point ingestion at
+  arbitrary worker filesystem paths.
+- **Secret-safe snapshot metadata** — git snapshot metadata stores a sanitized
+  remote URL with userinfo/query/fragment stripped, plus commit SHA; inline
+  document metadata stores counts/budgets, not raw content.
+- **Resource budgets** — per-inline-document bytes, per-file bytes,
+  total-file-count, total-repo-byte, and total-chunk caps prevent large resources
+  from exhausting worker memory/DB/disk. Git also skips LFS smudge and requests a
+  blob-size filter where the remote supports partial clone.
 - **No path traversal** — every repo file is resolved and confirmed to live
   inside the clone root; escaping symlinks are skipped.
 - **No arbitrary host reads via API** — document content is inline only.
@@ -156,6 +169,3 @@ make verify            # the canonical gate: all of the above in order
   blocking, redirect capture, response caps).
 - Coalesce concurrent refreshes per resource (return the active run id).
 - `ts_headline`-based highlighted snippets and language-config selection.
-- Git ingestion in the Compose smoke flow (needs a repo reachable from the worker
-  container; today git ingestion is covered by real-service integration tests
-  that run git locally, while the Compose smoke covers the document path).

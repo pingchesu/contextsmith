@@ -12,10 +12,11 @@ from redis import Redis
 from rq import Queue, SimpleWorker
 from sqlalchemy import text
 
+from contextsmith_api.auth import get_or_create_user
 from contextsmith_api.main import app
 from contextsmith_shared.config import get_settings
 from contextsmith_shared.db import get_engine, get_sessionmaker
-from contextsmith_shared.models import IndexRun
+from contextsmith_shared.models import IndexRun, Project, WorkspaceMembership
 from contextsmith_worker.jobs import run_index
 
 pytestmark = pytest.mark.integration
@@ -209,6 +210,91 @@ def test_search_enforces_workspace_membership() -> None:
     assert denied.status_code == 404
 
 
+def test_private_project_search_requires_project_membership() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id = make_project(client, "private")
+    resource_id = add_resource(
+        client,
+        workspace_id,
+        project_id,
+        headers,
+        {
+            "type": "markdown",
+            "name": "Private Notes",
+            "uri": "doc://private",
+            "source_config": {"content": "private marker basilisk in the vault"},
+        },
+    )
+    refresh(client, workspace_id, project_id, resource_id, headers)
+
+    session = get_sessionmaker()()
+    try:
+        other = get_or_create_user(session, "workspace-member-not-project@example.com")
+        session.add(
+            WorkspaceMembership(
+                workspace_id=uuid.UUID(workspace_id),
+                user_id=other.id,
+                role="member",
+            )
+        )
+        project = session.get(Project, uuid.UUID(project_id))
+        assert project is not None
+        project.visibility = "private"
+        session.commit()
+    finally:
+        session.close()
+
+    denied = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/search",
+        json={"query": "basilisk"},
+        headers={"X-User-Email": "workspace-member-not-project@example.com"},
+    )
+    assert denied.status_code == 404
+
+
+def test_resource_patch_rejects_null_non_nullable_fields() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id = make_project(client, "patch-null")
+    resource_id = add_resource(
+        client,
+        workspace_id,
+        project_id,
+        headers,
+        {
+            "type": "markdown",
+            "name": "Patch Notes",
+            "uri": "doc://patch",
+            "source_config": {"content": "patch marker"},
+        },
+    )
+    for field in ("name", "uri", "update_frequency", "source_config"):
+        patched = client.patch(
+            f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}",
+            json={field: None},
+            headers=headers,
+        )
+        assert patched.status_code == 422, (field, patched.status_code, patched.text)
+
+
+def test_search_cors_preflight_allows_frontend_origin() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id = make_project(client, "cors")
+    response = client.options(
+        f"/workspaces/{workspace_id}/projects/{project_id}/search",
+        headers={
+            "Origin": "http://localhost:13000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type,x-user-email",
+            **headers,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:13000"
+
+
 def test_reindex_uses_current_snapshot_only() -> None:
     require_real_services()
     client = TestClient(app)
@@ -308,6 +394,7 @@ def test_git_ingestion_indexes_text_files_with_commit_citation(tmp_path) -> None
     repo_path = str(tmp_path / "fixture-repo")
     os.makedirs(repo_path, exist_ok=True)
     commit = _build_fixture_repo(repo_path)
+    os.environ["CONTEXTSMITH_ALLOW_LOCAL_GIT"] = "true"
 
     resource_id = add_resource(
         client,

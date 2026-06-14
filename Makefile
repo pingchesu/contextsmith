@@ -4,7 +4,7 @@ BIN := $(VENV)/bin
 COMPOSE ?= docker compose
 export PYTHONPATH := apps/api:packages/shared:packages/worker
 
-.PHONY: venv web-deps lint test test-integration compose-up compose-down migrate qa-smoke verify clean
+.PHONY: venv web-deps lint test test-integration compose-up compose-down migrate qa-smoke verify clean prepare-qa-fixtures
 
 venv:
 	uv venv --python 3.11 --allow-existing $(VENV)
@@ -23,7 +23,10 @@ test: venv
 test-integration: venv
 	$(BIN)/pytest tests/integration -q
 
-compose-up:
+prepare-qa-fixtures:
+	mkdir -p tmp/qa-git-fixtures
+
+compose-up: prepare-qa-fixtures
 	$(COMPOSE) up -d --build
 
 compose-down:
