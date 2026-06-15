@@ -7,7 +7,7 @@ export class ApiError extends Error {
 export async function apiFetch<T>(settings: PlatformSettings, path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (settings.bearer.trim()) headers.Authorization = `Bearer ${settings.bearer.trim()}`;
-  else headers['X-User-Email'] = settings.email;
+  else if (settings.email.trim()) headers['X-User-Email'] = settings.email.trim();
   const response = await fetch(`${settings.apiBaseUrl}${path}`, { ...init, headers: { ...headers, ...(init.headers as Record<string, string> | undefined) } });
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;

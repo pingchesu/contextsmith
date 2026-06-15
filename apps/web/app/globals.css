@@ -54,6 +54,12 @@ pre.code-block.light { background: #f8fafc; color: #172033; border: 1px solid #e
 .scope-pill.active { background: #dbeafe; border-color: #2563eb; color: #1d4ed8; }
 .scope-pill small { color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notice { border-radius: 14px; padding: 14px; border: 1px solid #bae6fd; background: #f0f9ff; color: #0c4a6e; }
+.repo-agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.repo-agent-card { text-align: left; border: 1px solid #dbeafe; background: #fff; border-radius: 18px; padding: 16px; cursor: pointer; display: grid; gap: 10px; box-shadow: 0 10px 30px rgba(37,99,235,.05); color: inherit; }
+.repo-agent-card:hover, .repo-agent-card.active { border-color: #2563eb; background: #eff6ff; }
+.repo-agent-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.repo-agent-card-metrics { display: flex; flex-wrap: wrap; gap: 8px; color: #475569; font-size: 12px; font-weight: 800; }
+.repo-agent-card-metrics span { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; padding: 4px 8px; }
 .notice.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
 .empty { color: #64748b; font-style: italic; padding: 16px; border: 1px dashed #cbd5e1; border-radius: 14px; background: #f8fafc; }
 @media (max-width: 920px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; } .grid.two, .grid.three, .grid.four { grid-template-columns: 1fr; } }

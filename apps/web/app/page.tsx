@@ -7,11 +7,12 @@ import { fmt, short } from '../lib/api';
 
 export default function DashboardPage() {
   const { agents, agent, resources, provider, reviewItems, usageItems } = usePlatform();
+  const repoAgents = resources.filter((resource) => resource.type === 'git');
   const stale = reviewItems.filter((item) => item.freshness_status !== 'fresh').length;
   const hits = usageItems.reduce((sum, item) => sum + item.hit_count, 0);
   return <main className="page">
-    <PageHeader eyebrow="Dashboard" title="Agent catalog" description="Enterprise overview of generated knowledge agents, resource health, freshness, and usage." />
-    <div className="grid four"><Metric label="Agents" value={agents.length || (agent ? 1 : 0)} /><Metric label="Resources" value={resources.length} /><Metric label="Review risks" value={stale} /><Metric label="Retrieval hits" value={hits} /></div>
+    <PageHeader eyebrow="Dashboard" title="Repo-agent platform" description="This project turns each git repo into a scoped sub-agent and composes them into a cross-repo project agent. Start with Repo Agents to inspect what each repo agent knows and how Hermes/Codex should route to it." actions={<Link className="btn" href="/repo-agents">Open Repo Agents</Link>} />
+    <div className="grid four"><Metric label="Project agents" value={agents.length || (agent ? 1 : 0)} /><Metric label="Repo sub-agents" value={repoAgents.length} /><Metric label="Review risks" value={stale} /><Metric label="Retrieval hits" value={hits} /></div>
     <div className="grid two">
       <Card><h2>Current agent</h2>{agent ? <div className="grid"><p className="muted">{agent.description || 'Generated project agent backed by indexed repo/document resources.'}</p><div className="grid three"><Metric label="Runtime" value={agent.default_runtime} /><Metric label="Snapshots" value={agent.current_snapshot_count} /><Metric label="Graph" value={`${agent.graph_node_count}/${agent.graph_edge_count}`} /></div><div className="code">Last indexed {fmt(agent.last_index_finished_at)} · MCP {agent.mcp_endpoint}</div><Link className="btn" href="/agent-profile">Open agent profile</Link></div> : <EmptyState text="Agent profile is loading." />}</Card>
       <Card><h2>Provider status</h2><div className="grid"><StatusChip value={provider?.status} /><div className="code">{provider ? `${provider.embedding.namespace} · dev_quality=${provider.embedding.dev_quality}` : 'Provider not loaded'}</div><Link className="btn secondary" href="/config">Open configuration</Link></div></Card>

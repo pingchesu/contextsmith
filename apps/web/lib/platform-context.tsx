@@ -81,6 +81,10 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
     setLoading(true); setError(null);
     try {
       const { workspaceId, projectId } = settings;
+      if (!settings.bearer.trim() && !settings.email.trim()) {
+        setWorkspaces([]); setWorkspace(null); setProjects([]); setProject(null); setProvider(null); setAgents([]); setAgent(null); setResources([]); setReviewItems([]); setUsageItems([]); setTokens([]); setMembers([]); setAuditEvents([]); setSelectedResourceId(''); setSnapshots([]); setIndexRuns([]); setGraph(null);
+        return;
+      }
       const [workspaceList, currentWorkspace, projectList, currentProject, providerHealth, nextAgents, nextAgent, nextResources, review, usage, tokenList, memberList, events] = await Promise.all([
         client<Workspace[]>('/workspaces').catch(() => []),
         client<Workspace>(`/workspaces/${workspaceId}`).catch(() => null),
