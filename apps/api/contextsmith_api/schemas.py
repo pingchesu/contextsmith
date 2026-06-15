@@ -28,6 +28,21 @@ class ProjectRead(BaseModel):
     visibility: str
 
 
+class UserRead(BaseModel):
+    id: UUID
+    email: str
+    display_name: str | None = None
+    created_at: datetime | None = None
+
+
+class WorkspaceMemberRead(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    user: UserRead
+    role: str
+    created_at: datetime | None = None
+
+
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1)
     scopes: list[str] = Field(default_factory=list)
@@ -221,6 +236,11 @@ class AuditEventRead(BaseModel):
     target_ref: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
+
+
+class AuditEventListResponse(BaseModel):
+    count: int
+    events: list[AuditEventRead]
 
 
 class SearchRequest(BaseModel):

@@ -241,7 +241,7 @@ def test_resource_review_usage_archive_and_delete_flow() -> None:
     lifecycle_events = [event for event in audit.json() if event["target_id"] == resource_id]
     review_event = next(event for event in lifecycle_events if event["action"] == "resource.review")
     archive_event = next(event for event in lifecycle_events if event["action"] == "resource.archive")
-    restore_event = next(event for event in lifecycle_events if event["action"] == "resource.restore")
+    restore_event = next(event for event in lifecycle_events if event["action"] == "resource.restore" and event["metadata"]["previous"]["status"] == "archived")
     delete_event = next(event for event in lifecycle_events if event["action"] == "resource.delete")
     purge_event = next(event for event in lifecycle_events if event["action"] == "resource.purge")
     assert review_event["actor_user_id"] is not None
