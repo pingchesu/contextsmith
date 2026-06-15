@@ -8,7 +8,11 @@ import { short } from '../lib/api';
 
 const NAV = [
   ['/', 'Dashboard'],
+  ['/import', 'Import Resources'],
   ['/repo-agents', 'Repo Agents'],
+  ['/agent-files', 'Agent Files'],
+  ['/git-env', 'Git Env'],
+  ['/maintenance', 'Update / Reindex'],
   ['/agent-profile', 'Project Agent'],
   ['/resources', 'Resources'],
   ['/review', 'Review Center'],

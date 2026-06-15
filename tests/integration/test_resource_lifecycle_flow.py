@@ -406,10 +406,72 @@ def test_resource_lifecycle_requires_project_membership() -> None:
         ("post", f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/restore"),
         ("post", f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/purge"),
         ("post", f"/workspaces/{workspace_id}/projects/{project_id}/scheduled-refreshes"),
+        ("get", f"/workspaces/{workspace_id}/projects/{project_id}/agent-files"),
+        ("post", f"/workspaces/{workspace_id}/projects/{project_id}/agent-files/regenerate"),
+        ("get", f"/workspaces/{workspace_id}/projects/{project_id}/git-env"),
+        ("patch", f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/git-env"),
         ("delete", f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}"),
     ]:
         kwargs = {"headers": intruder}
         if method == "post" and url.endswith("/review"):
             kwargs["json"] = {"review_status": "approved"}
+        if method == "patch" and url.endswith("/git-env"):
+            kwargs["json"] = {"branch": "main"}
         response = getattr(client, method)(url, **kwargs)
         assert response.status_code == 404
+
+
+def test_agent_files_and_git_env_surface_repo_agent_outputs() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id = make_project(client, "m19-agent-files")
+    repo = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "git",
+            "name": "Runtime Repo",
+            "uri": "https://github.com/example/runtime.git",
+            "update_frequency": "daily",
+            "source_config": {"url": "https://github.com/example/runtime.git", "branch": "main"},
+        },
+        headers=headers,
+    )
+    assert repo.status_code == 201, repo.text
+    repo_id = repo.json()["id"]
+    doc_id = add_doc(client, workspace_id, project_id, headers, "Runbook", "agentfiles")
+
+    files = client.get(f"/workspaces/{workspace_id}/projects/{project_id}/agent-files", headers=headers)
+    assert files.status_code == 200, files.text
+    paths = {file["path"]: file for file in files.json()["files"]}
+    assert "contextsmith-agent.json" in paths
+    assert "AGENTS.md" in paths
+    assert "skills/project-agent/SKILL.md" in paths
+    assert "skills/runtime-repo/SKILL.md" in paths
+    assert "Runtime Repo" in paths["AGENTS.md"]["content"]
+    assert repo_id in paths["skills/runtime-repo/SKILL.md"]["content"]
+    assert doc_id in paths["contextsmith-agent.json"]["content"]
+
+    regen = client.post(f"/workspaces/{workspace_id}/projects/{project_id}/agent-files/regenerate", headers=headers)
+    assert regen.status_code == 200, regen.text
+    assert regen.json()["repo_agent_count"] == 1
+
+    env_list = client.get(f"/workspaces/{workspace_id}/projects/{project_id}/git-env", headers=headers)
+    assert env_list.status_code == 200, env_list.text
+    assert env_list.json()[0]["branch"] == "main"
+
+    patched = client.patch(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources/{repo_id}/git-env",
+        json={"branch": "develop", "auth_token_env": "GITHUB_TOKEN_FOR_CONTEXTSMITH", "update_frequency": "weekly"},
+        headers=headers,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["branch"] == "develop"
+    assert patched.json()["auth_token_env"] == "GITHUB_TOKEN_FOR_CONTEXTSMITH"
+    assert patched.json()["update_frequency"] == "weekly"
+
+    doc_env = client.patch(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources/{doc_id}/git-env",
+        json={"branch": "main"},
+        headers=headers,
+    )
+    assert doc_env.status_code == 422
