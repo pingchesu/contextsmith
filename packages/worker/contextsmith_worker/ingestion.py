@@ -616,7 +616,7 @@ def iter_repo_files(
 
 # --- git plumbing ----------------------------------------------------------
 
-def _git_env() -> dict[str, str]:
+def _git_env(source_config: dict | None = None, target_url: str | None = None) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
@@ -629,6 +629,16 @@ def _git_env() -> dict[str, str]:
             "GCM_INTERACTIVE": "never",
         }
     )
+    config = source_config or {}
+    token_env = config.get("auth_token_env")
+    if isinstance(token_env, str) and re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", token_env):
+        token = os.getenv(token_env)
+        if token and target_url and urlparse(target_url).scheme == "https":
+            parsed = urlparse(target_url)
+            base = f"{parsed.scheme}://{parsed.netloc}/"
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = f"http.{base}.extraHeader"
+            env["GIT_CONFIG_VALUE_0"] = f"Authorization: Bearer {token}"
     return env
 
 
@@ -640,6 +650,7 @@ def clone_repo(
     branch: str | None = None,
     timeout: int = DEFAULT_CLONE_TIMEOUT,
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    source_config: dict | None = None,
 ) -> None:
     """Clone ``target`` into ``dest`` with hooks disabled and no code execution."""
     args = [
@@ -671,7 +682,12 @@ def clone_repo(
     args += ["--", target, str(dest)]
     try:
         proc = subprocess.run(
-            args, env=_git_env(), timeout=timeout, capture_output=True, text=True, check=False
+            args,
+            env=_git_env(source_config, target),
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except FileNotFoundError as exc:  # git not installed
         raise RuntimeError("git executable not found") from exc
@@ -845,6 +861,7 @@ def _collect_git(resource: Resource) -> tuple[list[dict], str, str, dict]:
             branch=branch,
             timeout=timeout,
             max_file_bytes=max_file_bytes,
+            source_config=config,
         )
         commit = get_commit_sha(clone_dir)
         docs = [

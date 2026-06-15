@@ -174,6 +174,46 @@ class ResourceUsageResponse(BaseModel):
     resources: list[ResourceUsageItem]
 
 
+class AgentFileRead(BaseModel):
+    path: str
+    kind: str
+    description: str
+    content: str
+
+
+class AgentFilesResponse(BaseModel):
+    workspace_id: UUID
+    project_id: UUID
+    generated_at: datetime
+    resource_count: int
+    repo_agent_count: int
+    files: list[AgentFileRead]
+
+
+class GitResourceEnvRead(BaseModel):
+    resource_id: UUID
+    name: str
+    uri: str
+    branch: str | None = None
+    auth_token_env: str | None = None
+    clone_timeout: int | None = None
+    max_file_bytes: int | None = None
+    max_repo_files: int | None = None
+    max_repo_bytes: int | None = None
+    update_frequency: str
+    next_refresh_at: datetime | None = None
+
+
+class GitResourceEnvUpdate(BaseModel):
+    branch: str | None = None
+    auth_token_env: str | None = None
+    clone_timeout: int | None = Field(default=None, ge=1, le=600)
+    max_file_bytes: int | None = Field(default=None, ge=1)
+    max_repo_files: int | None = Field(default=None, ge=1)
+    max_repo_bytes: int | None = Field(default=None, ge=1)
+    update_frequency: str | None = None
+
+
 class DueRefreshResponse(BaseModel):
     scanned: int
     enqueued: int

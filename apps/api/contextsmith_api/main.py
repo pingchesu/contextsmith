@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -45,6 +47,8 @@ from contextsmith_api.schemas import (
     AgentContextCitation,
     AgentContextRequest,
     AgentContextResponse,
+    AgentFileRead,
+    AgentFilesResponse,
     AgentProfileRead,
     AgentProfileUpdate,
     ApiTokenCreate,
@@ -58,6 +62,8 @@ from contextsmith_api.schemas import (
     ContextPacketRead,
     ContextPacketRequest,
     DueRefreshResponse,
+    GitResourceEnvRead,
+    GitResourceEnvUpdate,
     GraphEdgeRead,
     GraphNodeRead,
     GraphRead,
@@ -249,6 +255,175 @@ def _agent_profile_read(session: Session, workspace_id: UUID, project: Project, 
         agent_context_endpoint=f"/workspaces/{workspace_id}/projects/{project.id}/agent-context",
         created_at=profile.created_at,
         updated_at=profile.updated_at,
+    )
+
+
+_SAFE_FILE_SLUG = re.compile(r"[^a-z0-9._-]+")
+
+
+def _file_slug(value: str) -> str:
+    slug = _SAFE_FILE_SLUG.sub("-", value.strip().lower()).strip("-._")
+    return slug or "agent"
+
+
+def _current_project_resources(session: Session, workspace_id: UUID, project_id: UUID) -> list[Resource]:
+    return list(
+        session.scalars(
+            select(Resource)
+            .where(
+                Resource.workspace_id == workspace_id,
+                Resource.project_id == project_id,
+                Resource.deleted_at.is_(None),
+            )
+            .order_by(Resource.type.asc(), Resource.name.asc())
+        )
+    )
+
+
+def _agent_file_response(
+    session: Session,
+    workspace_id: UUID,
+    project: Project,
+    profile: AgentProfile,
+    resources: list[Resource],
+) -> AgentFilesResponse:
+    repo_resources = [resource for resource in resources if resource.type.lower() == "git"]
+    resource_rows = [
+        {
+            "id": str(resource.id),
+            "name": resource.name,
+            "type": resource.type,
+            "uri": resource.uri,
+            "status": resource.status,
+            "retrieval_enabled": resource.retrieval_enabled,
+            "update_frequency": resource.update_frequency,
+            "current_snapshot_id": str(resource.current_snapshot_id) if resource.current_snapshot_id else None,
+        }
+        for resource in resources
+    ]
+    manifest = {
+        "schema": "contextsmith.agent_manifest.v1",
+        "workspace_id": str(workspace_id),
+        "project_id": str(project.id),
+        "agent_name": profile.name,
+        "default_runtime": profile.default_runtime,
+        "mcp_endpoint": f"/mcp/{workspace_id}/{project.id}",
+        "agent_context_endpoint": f"/workspaces/{workspace_id}/projects/{project.id}/agent-context",
+        "resources": resource_rows,
+        "repo_agents": [str(resource.id) for resource in repo_resources],
+    }
+    resources_md = "\n".join(
+        f"- `{resource.type}` **{resource.name}** (`{resource.id}`): {resource.uri}; refresh={resource.update_frequency}; snapshot={resource.current_snapshot_id or 'none'}"
+        for resource in resources
+    ) or "- No resources imported yet."
+    repo_skill_files = []
+    for resource in repo_resources:
+        source_config = resource.source_config or {}
+        repo_slug = _file_slug(resource.name)
+        repo_skill_files.append(
+            AgentFileRead(
+                path=f"skills/{repo_slug}/SKILL.md",
+                kind="repo-skill",
+                description=f"Hermes/Codex specialist skill for {resource.name}",
+                content=(
+                    "---\n"
+                    f"name: {repo_slug}\n"
+                    f"description: Use when answering or reviewing work related to the {resource.name} repository.\n"
+                    "---\n\n"
+                    f"# {resource.name} repo agent\n\n"
+                    "## Scope\n"
+                    f"- Resource ID: `{resource.id}`\n"
+                    f"- URI: `{resource.uri}`\n"
+                    f"- Branch/ref: `{source_config.get('branch') or source_config.get('ref') or 'default'}`\n"
+                    f"- Current snapshot: `{resource.current_snapshot_id or 'none'}`\n"
+                    f"- Update frequency: `{resource.update_frequency}`\n\n"
+                    "## How to use\n"
+                    "Query ContextSmith with this resource_id as the only resource scope when the task is repo-specific.\n"
+                    "Ask for cited files, symbols, entrypoints, config, runbooks, and operational boundaries before editing.\n\n"
+                    "## Safety boundary\n"
+                    "This skill provides context only. Production mutations still require Hermes approval, typed MCP tools, and evidence.\n"
+                ),
+            )
+        )
+    files = [
+        AgentFileRead(
+            path="contextsmith-agent.json",
+            kind="manifest",
+            description="Machine-readable project agent manifest for routers and external runtimes.",
+            content=json.dumps(manifest, indent=2, sort_keys=True),
+        ),
+        AgentFileRead(
+            path="AGENTS.md",
+            kind="agent-instructions",
+            description="Human-readable generated project agent instructions.",
+            content=(
+                f"# {profile.name}\n\n"
+                f"{profile.description or project.description or 'Generated ContextSmith project agent.'}\n\n"
+                "## Runtime contract\n"
+                f"- Default runtime: `{profile.default_runtime}`\n"
+                f"- Agent context endpoint: `/workspaces/{workspace_id}/projects/{project.id}/agent-context`\n"
+                f"- MCP endpoint: `/mcp/{workspace_id}/{project.id}`\n"
+                "- Repos are resources. Repo-agent is a generated feature on top of `type=git` resources.\n\n"
+                "## Resources\n"
+                f"{resources_md}\n\n"
+                "## Production boundary\n"
+                "Do not execute production mutations from generated context. Use Hermes approval + typed MCP + evidence workflow.\n"
+            ),
+        ),
+        AgentFileRead(
+            path="skills/project-agent/SKILL.md",
+            kind="project-skill",
+            description="Hermes/Codex project-level skill that routes to ContextSmith.",
+            content=(
+                "---\n"
+                f"name: {_file_slug(profile.name)}\n"
+                f"description: Use when answering cross-resource questions for {profile.name}.\n"
+                "---\n\n"
+                f"# {profile.name}\n\n"
+                "Use ContextSmith agent-context for cross-resource answers. Prefer scoped repo-resource queries when the task names a repo/service.\n\n"
+                "## Resource routing\n"
+                f"{resources_md}\n"
+            ),
+        ),
+        AgentFileRead(
+            path=".env.contextsmith.example",
+            kind="env-example",
+            description="Environment variables for external runtimes and git import workers.",
+            content=(
+                "CONTEXTSMITH_API_BASE_URL=http://localhost:18000\n"
+                f"CONTEXTSMITH_WORKSPACE_ID={workspace_id}\n"
+                f"CONTEXTSMITH_PROJECT_ID={project.id}\n"
+                "CONTEXTSMITH_API_TOKEN=replace-with-project-query-token\n"
+                "# Optional: set this on workers, then reference its name in a repo's Git Env auth_token_env.\n"
+                "GITHUB_TOKEN_FOR_CONTEXTSMITH=replace-with-git-token\n"
+            ),
+        ),
+        *repo_skill_files,
+    ]
+    return AgentFilesResponse(
+        workspace_id=workspace_id,
+        project_id=project.id,
+        generated_at=datetime.now(UTC),
+        resource_count=len(resources),
+        repo_agent_count=len(repo_resources),
+        files=files,
+    )
+
+
+def _git_env_read(resource: Resource) -> GitResourceEnvRead:
+    source_config = resource.source_config or {}
+    return GitResourceEnvRead(
+        resource_id=resource.id,
+        name=resource.name,
+        uri=resource.uri,
+        branch=source_config.get("branch") or source_config.get("ref"),
+        auth_token_env=source_config.get("auth_token_env"),
+        clone_timeout=source_config.get("clone_timeout"),
+        max_file_bytes=source_config.get("max_file_bytes"),
+        max_repo_files=source_config.get("max_repo_files"),
+        max_repo_bytes=source_config.get("max_repo_bytes"),
+        update_frequency=resource.update_frequency,
+        next_refresh_at=resource.next_refresh_at,
     )
 
 
@@ -804,6 +979,119 @@ def update_agent_profile(
     )
     session.commit()
     return _agent_profile_read(session, workspace_id, project, profile)
+
+
+@app.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/agent-files",
+    response_model=AgentFilesResponse,
+)
+def get_agent_files(
+    workspace_id: UUID,
+    project_id: UUID,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> AgentFilesResponse:
+    require_scope(principal, "project:read")
+    project = _require_project_access(session, workspace_id, project_id, principal)
+    profile = _ensure_agent_profile(session, workspace_id, project, principal.user.id)
+    resources = _current_project_resources(session, workspace_id, project_id)
+    session.commit()
+    return _agent_file_response(session, workspace_id, project, profile, resources)
+
+
+@app.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/agent-files/regenerate",
+    response_model=AgentFilesResponse,
+)
+def regenerate_agent_files(
+    workspace_id: UUID,
+    project_id: UUID,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> AgentFilesResponse:
+    require_scope(principal, "resource:refresh")
+    project = _require_project_member(session, workspace_id, project_id, principal)
+    profile = _ensure_agent_profile(session, workspace_id, project, principal.user.id)
+    resources = _current_project_resources(session, workspace_id, project_id)
+    session.add(
+        AuditEvent(
+            workspace_id=workspace_id,
+            actor_user_id=principal.user.id,
+            actor_token_id=principal.token_id,
+            action="agent_files.regenerate",
+            target_type="project",
+            target_id=project_id,
+            meta={"resource_count": len(resources), "repo_agent_count": len([r for r in resources if r.type.lower() == "git"])},
+        )
+    )
+    session.commit()
+    return _agent_file_response(session, workspace_id, project, profile, resources)
+
+
+@app.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/git-env",
+    response_model=list[GitResourceEnvRead],
+)
+def list_git_env(
+    workspace_id: UUID,
+    project_id: UUID,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> list[GitResourceEnvRead]:
+    require_scope(principal, "resource:read")
+    _require_project_access(session, workspace_id, project_id, principal)
+    resources = [
+        resource
+        for resource in _current_project_resources(session, workspace_id, project_id)
+        if resource.type.lower() == "git" and token_allows_resource(principal, resource.id)
+    ]
+    return [_git_env_read(resource) for resource in resources]
+
+
+@app.patch(
+    "/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/git-env",
+    response_model=GitResourceEnvRead,
+)
+def update_git_env(
+    workspace_id: UUID,
+    project_id: UUID,
+    resource_id: UUID,
+    payload: GitResourceEnvUpdate,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> GitResourceEnvRead:
+    require_scope(principal, "resource:write")
+    _require_project_member(session, workspace_id, project_id, principal)
+    resource = _resolve_resource(session, workspace_id, project_id, resource_id, principal)
+    if resource.type.lower() != "git":
+        raise HTTPException(status_code=422, detail="git env can only be configured for git resources")
+    fields = payload.model_dump(exclude_unset=True)
+    source_config = dict(resource.source_config or {})
+    source_config.setdefault("url", resource.uri)
+    for key in ("branch", "auth_token_env", "clone_timeout", "max_file_bytes", "max_repo_files", "max_repo_bytes"):
+        if key in fields:
+            value = fields[key]
+            if value is None or value == "":
+                source_config.pop(key, None)
+            else:
+                source_config[key] = value
+    if "update_frequency" in fields and fields["update_frequency"] is not None:
+        resource.update_frequency = fields["update_frequency"]
+    resource.source_config = _validate_source_config(resource.type, resource.uri, source_config)
+    resource.next_refresh_at = compute_next_refresh_at(resource)
+    session.add(
+        AuditEvent(
+            workspace_id=workspace_id,
+            actor_user_id=principal.user.id,
+            actor_token_id=principal.token_id,
+            action="resource.git_env.update",
+            target_type="resource",
+            target_id=resource.id,
+            meta={"fields": sorted(fields.keys())},
+        )
+    )
+    session.commit()
+    return _git_env_read(resource)
 
 
 @app.post(
