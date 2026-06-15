@@ -8,10 +8,12 @@ import { short } from '../lib/api';
 
 const NAV = [
   ['/', 'Dashboard'],
-  ['/agent-profile', 'Agent Profile'],
+  ['/repo-agents', 'Repo Agents'],
+  ['/agent-profile', 'Project Agent'],
   ['/resources', 'Resources'],
   ['/review', 'Review Center'],
   ['/ask', 'Ask / Citations'],
+  ['/login', 'Login / Logout'],
   ['/config', 'Config'],
   ['/users', 'User Management'],
   ['/admin', 'Admin'],
@@ -20,6 +22,7 @@ const NAV = [
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { agent, provider, workspace, project, settings, loading, error, reload } = usePlatform();
+  const principal = settings.bearer.trim() ? 'token session' : settings.email.trim() || 'signed out';
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-kicker">CONTEXTSMITH</div><div className="brand-title">Knowledge Agents</div></div>
@@ -28,8 +31,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     </aside>
     <section className="main">
       <header className="topbar">
-        <div><strong>{agent?.name ?? 'Loading agent…'}</strong><div className="code">{workspace?.name ?? short(settings.workspaceId)} · {project?.name ?? short(settings.projectId)} · {provider ? `${provider.embedding.provider}/${provider.embedding.model}` : 'provider not loaded'} {error ? `· ${error}` : ''}</div></div>
-        <div className="toolbar"><span className={`chip ${provider?.status === 'ok' ? 'ok' : 'warn'}`}>{provider?.status ?? 'loading'}</span><button className="btn secondary" onClick={() => reload()} disabled={loading}>{loading ? 'Loading…' : 'Reload'}</button></div>
+        <div><strong>{agent?.name ?? 'Loading agent…'}</strong><div className="code">{workspace?.name ?? short(settings.workspaceId)} · {project?.name ?? short(settings.projectId)} · signed in as {principal} · {provider ? `${provider.embedding.provider}/${provider.embedding.model}` : 'provider not loaded'} {error ? `· ${error}` : ''}</div></div>
+        <div className="toolbar"><span className={`chip ${provider?.status === 'ok' ? 'ok' : 'warn'}`}>{provider?.status ?? (principal === 'signed out' ? 'signed out' : 'loading')}</span><Link className="btn secondary" href="/login">Session</Link><button className="btn secondary" onClick={() => reload()} disabled={loading}>{loading ? 'Loading…' : 'Reload'}</button></div>
       </header>
       {children}
     </section>

@@ -1,0 +1,113 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { PageHeader, Card, Metric, StatusChip, EmptyState } from '../../components/ui';
+import { AgentContextPreview } from '../../components/AgentContextPreview';
+import { usePlatform } from '../../lib/platform-context';
+import type { AgentContextResponse, Resource, ReviewItem, UsageItem } from '../../lib/types';
+import { fmt, short } from '../../lib/api';
+
+function readiness(resource: Resource, review?: ReviewItem) {
+  if (resource.status !== 'active') return 'inactive';
+  if (!resource.retrieval_enabled) return 'retrieval-off';
+  if (!resource.current_snapshot_id) return 'not-indexed';
+  if (review?.freshness_status && review.freshness_status !== 'fresh') return 'needs-review';
+  return 'ready';
+}
+
+function invocation(resource: Resource, workspaceId: string, projectId: string) {
+  return JSON.stringify({
+    endpoint: `/workspaces/${workspaceId}/projects/${projectId}/agent-context`,
+    body: {
+      runtime: 'hermes',
+      resource_ids: [resource.id],
+      query: `Ask the ${resource.name} repo agent how this repo works and cite exact files.`,
+      include_code_symbols: true,
+    },
+  }, null, 2);
+}
+
+function suggestedQuestions(resource: Resource) {
+  const name = resource.name;
+  return [
+    `What is ${name} responsible for in this project?`,
+    `Show the main entrypoints, config files, and runtime boundaries for ${name}.`,
+    `What should a Hermes/Codex specialist know before editing ${name}?`,
+    `Find likely runbooks, deployment logic, and operational risks in ${name}.`,
+  ];
+}
+
+export default function RepoAgentsPage() {
+  const { resources, reviewItems, usageItems, settings, client, agent } = usePlatform();
+  const repoAgents = useMemo(() => resources.filter((resource) => resource.type === 'git'), [resources]);
+  const reviewByResource = useMemo(() => new Map(reviewItems.map((item) => [item.resource.id, item])), [reviewItems]);
+  const usageByResource = useMemo(() => new Map(usageItems.map((item) => [item.resource_id, item])), [usageItems]);
+  const [selectedId, setSelectedId] = useState<string>('');
+  const [preview, setPreview] = useState<AgentContextResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const selected = repoAgents.find((resource) => resource.id === selectedId) ?? repoAgents[0] ?? null;
+  const selectedReview = selected ? reviewByResource.get(selected.id) : undefined;
+  const selectedUsage = selected ? usageByResource.get(selected.id) : undefined;
+
+  async function generateSubAgentPrompt(resource: Resource) {
+    setSelectedId(resource.id);
+    setGenerating(true); setError(null);
+    try {
+      const result = await client<AgentContextResponse>(`/workspaces/${settings.workspaceId}/projects/${settings.projectId}/agent-context`, {
+        method: 'POST',
+        body: JSON.stringify({
+          query: `You are the ${resource.name} repo sub-agent. Build a concise operating brief for Hermes/Codex: repo purpose, entrypoints, key files, config/runtime boundaries, how to answer questions about this repo, and what not to mutate without approval. Cite exact files.`,
+          runtime: agent?.default_runtime ?? 'hermes',
+          resource_ids: [resource.id],
+          top_k: 14,
+          max_chars: 22000,
+          include_code_symbols: true,
+        }),
+      });
+      setPreview(result);
+    } catch (err) { setError(String(err)); }
+    finally { setGenerating(false); }
+  }
+
+  return <main className="page">
+    <PageHeader eyebrow="Repo Agents" title="Git repos as sub-agents" description="Each git resource is treated as a scoped repo sub-agent with its own identity, readiness, invocation contract, generated operating brief, citations, and symbols. This is the repo-as-agent surface, not a generic index table." actions={<button className="btn" disabled={!selected || generating} onClick={() => selected && void generateSubAgentPrompt(selected)}>{generating ? 'Generating…' : 'Generate selected sub-agent brief'}</button>} />
+    <div className="grid four"><Metric label="Repo sub-agents" value={repoAgents.length} /><Metric label="Ready" value={repoAgents.filter((resource) => readiness(resource, reviewByResource.get(resource.id)) === 'ready').length} /><Metric label="Needs review" value={repoAgents.filter((resource) => readiness(resource, reviewByResource.get(resource.id)) !== 'ready').length} /><Metric label="Current project agent" value={agent?.name ?? '—'} /></div>
+    {repoAgents.length === 0 ? <EmptyState text="No git resources found. Add a git repo resource to create a repo sub-agent." /> : <div className="repo-agent-grid">{repoAgents.map((resource) => {
+      const review = reviewByResource.get(resource.id);
+      const usage = usageByResource.get(resource.id);
+      const state = readiness(resource, review);
+      return <button type="button" key={resource.id} className={`repo-agent-card ${selected?.id === resource.id ? 'active' : ''}`} onClick={() => { setSelectedId(resource.id); setPreview(null); }}>
+        <div className="repo-agent-card-head"><strong>{resource.name}</strong><StatusChip value={state} /></div>
+        <div className="muted">Repo sub-agent generated from git resource</div>
+        <div className="code">{resource.uri}</div>
+        <div className="repo-agent-card-metrics"><span>hits {usage?.hit_count ?? 0}</span><span>snapshot {short(resource.current_snapshot_id)}</span><span>{review?.freshness_status ?? 'unknown'}</span></div>
+      </button>;
+    })}</div>}
+    {selected ? <div className="grid two">
+      <Card>
+        <h2>{selected.name} sub-agent</h2>
+        <p className="muted">This repo is a scoped sub-agent. Hermes/Codex should route repo-specific questions to this resource id instead of querying the whole project blindly.</p>
+        <div className="grid three"><Metric label="Readiness" value={readiness(selected, selectedReview)} /><Metric label="Review" value={selected.review_status} /><Metric label="Retrieval hits" value={selectedUsage?.hit_count ?? 0} /></div>
+        <div><div className="label">Repo identity</div><div className="code">resource_id={selected.id}<br />snapshot={selected.current_snapshot_id ?? 'none'}<br />uri={selected.uri}</div></div>
+        <div><div className="label">Freshness / lifecycle</div><div className="code">last_refresh={fmt(selected.last_refresh_finished_at)}<br />next_refresh={fmt(selected.next_refresh_at)}<br />stale_reasons={selectedReview?.stale_reasons.join(', ') || 'none'}</div></div>
+      </Card>
+      <Card>
+        <h2>Runtime invocation contract</h2>
+        <p className="muted">This is the concrete contract that makes it repo-as-agent: the runtime asks the project agent with this repo resource id as the specialist scope.</p>
+        <pre className="code-block light">{invocation(selected, settings.workspaceId, settings.projectId)}</pre>
+      </Card>
+      <Card>
+        <h2>What to ask this sub-agent</h2>
+        <div className="grid">{suggestedQuestions(selected).map((question) => <button key={question} type="button" className="scope-pill" onClick={() => void generateSubAgentPrompt(selected)}><strong>{question}</strong><small>Generates a cited, repo-scoped operating brief</small></button>)}</div>
+      </Card>
+      <Card>
+        <h2>Sub-agent boundary</h2>
+        <div className="notice">This sub-agent can explain and cite its repo. It does not perform production mutations. Production actions still go through Hermes approval, typed MCP tools, and evidence workflow.</div>
+        <pre className="code-block light">{`Agent identity: ${selected.name}\nScope: this repo only\nRuntime: ${agent?.default_runtime ?? 'hermes'}\nAllowed operation: cited context and code-symbol retrieval\nDisallowed operation: direct production mutation without Hermes approval`}</pre>
+      </Card>
+    </div> : null}
+    {error ? <div className="notice error">{error}</div> : null}
+    <AgentContextPreview result={preview} resources={resources} title="Generated repo sub-agent operating brief" />
+  </main>;
+}
