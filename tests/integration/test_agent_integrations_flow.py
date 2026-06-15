@@ -195,6 +195,25 @@ def test_agent_registry_respects_private_project_membership() -> None:
     intruder_agents = client.get(f"/workspaces/{workspace_id}/agents", headers=intruder)
     assert intruder_agents.status_code == 200, intruder_agents.text
     assert all(agent["project_id"] != project_id for agent in intruder_agents.json())
+    intruder_projects = client.get(f"/workspaces/{workspace_id}/projects", headers=intruder)
+    assert intruder_projects.status_code == 200, intruder_projects.text
+    assert all(project["id"] != project_id for project in intruder_projects.json())
+
+
+def test_workspace_member_listing_requires_admin_token_scope() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, _project_id = make_project(client, "m7-members")
+
+    token = client.post(
+        f"/workspaces/{workspace_id}/api-tokens",
+        json={"name": "read-only", "scopes": ["project:read"]},
+        headers=headers,
+    )
+    assert token.status_code == 201, token.text
+    bearer_headers = {"Authorization": f"Bearer {token.json()['token']}"}
+    members = client.get(f"/workspaces/{workspace_id}/members", headers=bearer_headers)
+    assert members.status_code == 403, members.text
 
 
 def test_agent_context_and_mcp_are_permission_scoped() -> None:

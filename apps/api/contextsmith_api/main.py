@@ -9,7 +9,6 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from redis import Redis
 from rq import Queue
@@ -27,12 +26,21 @@ from contextsmith_api.auth import (
     token_allows_project,
     token_allows_resource,
 )
+from contextsmith_api.constants import (
+    ACTIVE_INDEX_STATUSES,
+    ALLOWED_TOKEN_SCOPES,
+    COMMON_AGENT_INSTRUCTION,
+    RUNTIME_INSTRUCTIONS,
+    UPLOAD_RESOURCE_TYPES,
+    URL_RESOURCE_TYPES,
+)
 from contextsmith_api.retrieval import (
     RetrievalCandidate,
     embedding_namespace_diagnostics,
     make_snippet,
     retrieve_context_candidates,
 )
+from contextsmith_api.routers import system as system_router
 from contextsmith_api.schemas import (
     AgentContextCitation,
     AgentContextRequest,
@@ -69,12 +77,14 @@ from contextsmith_api.schemas import (
     SearchRequest,
     SearchResponse,
     SnapshotRead,
+    UserRead,
     WorkspaceCreate,
+    WorkspaceMemberRead,
     WorkspaceRead,
 )
 from contextsmith_shared.config import get_settings
 from contextsmith_shared.db import get_session
-from contextsmith_shared.embeddings import current_embedding_config, verify_provider_health
+from contextsmith_shared.embeddings import current_embedding_config
 from contextsmith_shared.lifecycle import compute_next_refresh_at
 from contextsmith_shared.models import (
     AgentProfile,
@@ -91,6 +101,7 @@ from contextsmith_shared.models import (
     Resource,
     RetrievalHit,
     SourceSnapshot,
+    User,
     Workspace,
     WorkspaceMembership,
 )
@@ -107,20 +118,6 @@ from contextsmith_worker.ingestion import (
 
 app = FastAPI(title="ContextSmith API", version="0.1.0")
 
-ALLOWED_TOKEN_SCOPES = {
-    "project:read",
-    "project:query",
-    "resource:read",
-    "resource:write",
-    "resource:refresh",
-    "review:read",
-    "review:write",
-    "token:admin",
-}
-ACTIVE_INDEX_STATUSES = {"enqueueing", "queued", "running"}
-URL_RESOURCE_TYPES = {"url", "web", "webpage", "website", "http", "https"}
-UPLOAD_RESOURCE_TYPES = {"upload", "uploaded_file", "file_upload"}
-
 def _cors_origins() -> list[str]:
     raw = os.getenv("CONTEXTSMITH_CORS_ORIGINS")
     if raw:
@@ -135,6 +132,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(system_router.router)
 
 
 def run_migrations_if_requested() -> None:
@@ -145,25 +143,6 @@ def run_migrations_if_requested() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     run_migrations_if_requested()
-
-
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/readyz")
-def readyz(session: Session = Depends(get_session)) -> dict[str, str]:
-    session.execute(text("select 1"))
-    Redis.from_url(get_settings().redis_url).ping()
-    return {"status": "ready"}
-
-
-@app.get("/provider-health")
-def provider_health() -> JSONResponse:
-    health = verify_provider_health()
-    status_code = 200 if health.get("status") == "ok" else 503
-    return JSONResponse(status_code=status_code, content=health)
 
 
 def _resolve_project(session: Session, workspace_id: UUID, project_id: UUID) -> Project:
@@ -208,27 +187,44 @@ def _agent_profile_read(session: Session, workspace_id: UUID, project: Project, 
         session.execute(
             text(
                 """
+            WITH current_snapshots AS (
+              SELECT current_snapshot_id
+              FROM resources
+              WHERE workspace_id = :ws
+                AND project_id = :proj
+                AND deleted_at IS NULL
+                AND current_snapshot_id IS NOT NULL
+            )
             SELECT
-              COUNT(DISTINCT r.id) AS resource_count,
-              COUNT(DISTINCT r.current_snapshot_id) FILTER (WHERE r.current_snapshot_id IS NOT NULL) AS current_snapshot_count,
-              COUNT(DISTINCT gn.id) AS graph_node_count,
-              COUNT(DISTINCT ge.id) AS graph_edge_count,
-              MAX(ir.finished_at) AS last_index_finished_at
-            FROM projects p
-            LEFT JOIN resources r ON r.project_id = p.id
-              AND r.workspace_id = p.workspace_id
-              AND r.deleted_at IS NULL
-            LEFT JOIN graph_nodes gn ON gn.project_id = p.id
-              AND gn.workspace_id = p.workspace_id
-              AND gn.source_snapshot_id = r.current_snapshot_id
-            LEFT JOIN graph_edges ge ON ge.project_id = p.id
-              AND ge.workspace_id = p.workspace_id
-              AND ge.source_snapshot_id = r.current_snapshot_id
-            LEFT JOIN index_runs ir ON ir.project_id = p.id
-              AND ir.workspace_id = p.workspace_id
-              AND ir.status = 'succeeded'
-            WHERE p.workspace_id = :ws AND p.id = :proj
-            GROUP BY p.id
+              (
+                SELECT COUNT(*)
+                FROM resources r
+                WHERE r.workspace_id = :ws
+                  AND r.project_id = :proj
+                  AND r.deleted_at IS NULL
+              ) AS resource_count,
+              (SELECT COUNT(*) FROM current_snapshots) AS current_snapshot_count,
+              (
+                SELECT COUNT(*)
+                FROM graph_nodes gn
+                WHERE gn.workspace_id = :ws
+                  AND gn.project_id = :proj
+                  AND gn.source_snapshot_id IN (SELECT current_snapshot_id FROM current_snapshots)
+              ) AS graph_node_count,
+              (
+                SELECT COUNT(*)
+                FROM graph_edges ge
+                WHERE ge.workspace_id = :ws
+                  AND ge.project_id = :proj
+                  AND ge.source_snapshot_id IN (SELECT current_snapshot_id FROM current_snapshots)
+              ) AS graph_edge_count,
+              (
+                SELECT MAX(ir.finished_at)
+                FROM index_runs ir
+                WHERE ir.workspace_id = :ws
+                  AND ir.project_id = :proj
+                  AND ir.status = 'succeeded'
+              ) AS last_index_finished_at
             """
             ),
             {"ws": workspace_id, "proj": project.id},
@@ -400,6 +396,43 @@ def _validate_token_scopes(scopes: list[str]) -> list[str]:
     return normalized
 
 
+def _user_read(user: User) -> UserRead:
+    return UserRead(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        created_at=user.created_at,
+    )
+
+
+def _workspace_member_read(session: Session, membership: WorkspaceMembership) -> WorkspaceMemberRead:
+    user = session.get(User, membership.user_id)
+    if user is None:
+        raise HTTPException(status_code=500, detail="workspace membership references missing user")
+    return WorkspaceMemberRead(
+        id=membership.id,
+        workspace_id=membership.workspace_id,
+        user=_user_read(user),
+        role=membership.role,
+        created_at=membership.created_at,
+    )
+
+
+def _audit_event_read(event: AuditEvent) -> AuditEventRead:
+    return AuditEventRead(
+        id=event.id,
+        workspace_id=event.workspace_id,
+        actor_user_id=event.actor_user_id,
+        actor_token_id=event.actor_token_id,
+        action=event.action,
+        target_type=event.target_type,
+        target_id=event.target_id,
+        target_ref=event.target_ref or {},
+        metadata=event.meta or {},
+        created_at=event.created_at,
+    )
+
+
 def _api_token_read(token: ApiToken) -> ApiTokenRead:
     return ApiTokenRead(
         id=token.id,
@@ -461,6 +494,32 @@ def create_workspace(
     )
     session.commit()
     return workspace
+
+
+@app.get("/workspaces", response_model=list[WorkspaceRead])
+def list_workspaces(
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> list[Workspace]:
+    require_scope(principal, "project:read")
+    if principal.api_token is not None:
+        workspace = session.get(Workspace, principal.api_token.workspace_id)
+        if workspace is None or workspace.deleted_at is not None:
+            return []
+        return [workspace]
+    memberships = session.scalars(
+        select(WorkspaceMembership).where(WorkspaceMembership.user_id == principal.user.id)
+    ).all()
+    workspace_ids = [membership.workspace_id for membership in memberships]
+    if not workspace_ids:
+        return []
+    return list(
+        session.scalars(
+            select(Workspace)
+            .where(Workspace.id.in_(workspace_ids), Workspace.deleted_at.is_(None))
+            .order_by(Workspace.created_at.asc())
+        )
+    )
 
 
 @app.get("/workspaces/{workspace_id}", response_model=WorkspaceRead)
@@ -569,6 +628,49 @@ def revoke_api_token(
     )
     session.commit()
     return _api_token_read(token)
+
+
+@app.get("/workspaces/{workspace_id}/projects", response_model=list[ProjectRead])
+def list_projects(
+    workspace_id: UUID,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> list[Project]:
+    require_scope(principal, "project:read")
+    require_workspace_member(session, workspace_id, principal)
+    predicates = [Project.workspace_id == workspace_id, Project.deleted_at.is_(None)]
+    projects = list(session.scalars(select(Project).where(*predicates).order_by(Project.created_at.asc())))
+    visible: list[Project] = []
+    for project in projects:
+        if not token_allows_project(principal, project.id):
+            continue
+        try:
+            visible.append(_require_project_access(session, workspace_id, project.id, principal))
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                continue
+            raise
+    return visible
+
+
+@app.get("/workspaces/{workspace_id}/members", response_model=list[WorkspaceMemberRead])
+def list_workspace_members(
+    workspace_id: UUID,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> list[WorkspaceMemberRead]:
+    require_scope(principal, "project:read")
+    if principal.is_token:
+        require_scope(principal, "token:admin")
+    _require_workspace_admin(session, workspace_id, principal)
+    memberships = list(
+        session.scalars(
+            select(WorkspaceMembership)
+            .where(WorkspaceMembership.workspace_id == workspace_id)
+            .order_by(WorkspaceMembership.created_at.asc())
+        )
+    )
+    return [_workspace_member_read(session, membership) for membership in memberships]
 
 
 @app.post("/workspaces/{workspace_id}/projects", response_model=ProjectRead, status_code=201)
@@ -877,7 +979,7 @@ def list_audit_events(
         session.scalars(
             select(AuditEvent)
             .where(AuditEvent.workspace_id == workspace_id)
-            .order_by(AuditEvent.created_at.asc())
+            .order_by(AuditEvent.created_at.desc())
         )
     )
     return [
@@ -1700,19 +1802,6 @@ def code_search_project(
     return CodeSearchResponse(query=payload.query, count=len(symbols), symbols=symbols)
 
 
-_COMMON_AGENT_INSTRUCTION = (
-    "ContextSmith is a read-only context provider. Use only cited project context for factual claims, "
-    "do not treat this packet as authorization for production mutations, and preserve external approval/MCP boundaries."
-)
-
-_RUNTIME_INSTRUCTIONS = {
-    "api": "If evidence is insufficient, say what is missing.",
-    "hermes": "You are a Hermes specialist agent. Keep production discipline explicit.",
-    "claude": "Use this packet as project context. Prefer cited evidence over prior assumptions and ask for missing runtime state when needed.",
-    "codex": "Use this packet as repository context. Do not edit files unless the caller explicitly asks; cite paths and snapshots when explaining.",
-    "cursor": "Use this packet for editor assistance. Prefer precise file/path citations and avoid broad rewrites without evidence.",
-}
-
 
 def _record_agent_context_usage(
     session: Session,
@@ -1848,7 +1937,7 @@ def _build_agent_context_response(
         )
     )
     actual_runtime = payload.runtime or (profile.default_runtime if profile else "api")
-    instruction_parts = [_COMMON_AGENT_INSTRUCTION, _RUNTIME_INSTRUCTIONS[actual_runtime]]
+    instruction_parts = [COMMON_AGENT_INSTRUCTION, RUNTIME_INSTRUCTIONS[actual_runtime]]
     if profile and profile.system_prompt:
         instruction_parts.append(profile.system_prompt)
     _record_agent_context_usage(
