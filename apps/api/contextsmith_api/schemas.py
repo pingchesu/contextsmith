@@ -156,6 +156,8 @@ class ResourceUpdate(BaseModel):
 
 
 class ResourceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     workspace_id: UUID
     project_id: UUID
@@ -429,6 +431,8 @@ class PurgeResourceResponse(BaseModel):
 
 
 class IndexRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     workspace_id: UUID
     project_id: UUID
@@ -448,6 +452,35 @@ class IndexRunRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime | None = None
+
+
+class FolderBundleUploadResponse(BaseModel):
+    resource: ResourceRead
+    index_run: IndexRunRead
+
+
+class ResourceManifestFileRead(BaseModel):
+    id: UUID
+    normalized_path: str
+    display_path: str | None = None
+    size_bytes: int
+    content_hash: str
+    mime_type: str | None = None
+    status: str
+    warnings_json: list = Field(default_factory=list)
+
+
+class ResourceManifestRead(BaseModel):
+    id: UUID
+    resource_id: UUID
+    source_snapshot_id: UUID
+    manifest_hash: str
+    file_count: int
+    total_bytes: int
+    parser_warning_count: int
+    unsupported_file_count: int
+    created_at: datetime
+    files: list[ResourceManifestFileRead]
 
 
 class SnapshotRead(BaseModel):

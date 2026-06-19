@@ -53,6 +53,13 @@ from contextsmith_shared.models import (
     SnapshotFile,
     SourceSnapshot,
 )
+from contextsmith_worker.manifest import (
+    DEFAULT_MAX_MANIFEST_FILE_COUNT,
+    DEFAULT_MAX_MANIFEST_TOTAL_BYTES,
+    HARD_MAX_MANIFEST_FILE_COUNT,
+    HARD_MAX_MANIFEST_TOTAL_BYTES,
+)
+from contextsmith_worker.manifest_store import ManifestFileInput, create_resource_manifest
 
 # --- configuration ---------------------------------------------------------
 
@@ -88,6 +95,7 @@ DOCUMENT_TYPES = {
 GIT_TYPES = {"git", "git_repo", "git-repo", "repo", "repository"}
 URL_TYPES = {"url", "web", "webpage", "website", "http", "https"}
 UPLOAD_TYPES = {"upload", "uploaded_file", "file_upload"}
+FOLDER_BUNDLE_TYPES = {"folder_bundle"}
 
 # Directories that never contain source worth indexing.
 SKIP_DIRS = {
@@ -914,6 +922,82 @@ def _collect_git(resource: Resource) -> tuple[list[dict], str, str, dict]:
     return docs, commit, "commit_sha", meta
 
 
+def _collect_folder_bundle(resource: Resource) -> tuple[list[dict], str, str, dict]:
+    from contextsmith_worker.bundle_ingest import assert_under_uploads, extract_zip_to_sandbox
+
+    config = resource.source_config or {}
+    staged_zip_path = str(config.get("staged_zip_path") or "")
+    if not staged_zip_path:
+        raise RuntimeError("folder_bundle source_config missing staged_zip_path")
+    work_base = _work_base()
+    real_staged = assert_under_uploads(staged_zip_path, work_base)
+    max_file_count = min(
+        int(config.get("max_file_count", DEFAULT_MAX_MANIFEST_FILE_COUNT)),
+        HARD_MAX_MANIFEST_FILE_COUNT,
+    )
+    max_total_bytes = min(
+        int(config.get("max_total_bytes", DEFAULT_MAX_MANIFEST_TOTAL_BYTES)),
+        HARD_MAX_MANIFEST_TOTAL_BYTES,
+    )
+    sandbox_dir = tempfile.mkdtemp(prefix="bundle-", dir=work_base)
+    try:
+        file_rows = extract_zip_to_sandbox(
+            real_staged,
+            sandbox_dir,
+            max_file_count=max_file_count,
+            max_total_bytes=max_total_bytes,
+        )
+    finally:
+        shutil.rmtree(sandbox_dir, ignore_errors=True)
+        try:
+            os.unlink(real_staged)
+        except OSError:
+            pass
+
+    docs = [
+        {
+            "path": row["normalized_path"],
+            "title": row["normalized_path"],
+            "content": row["text"],
+            "meta": {
+                "source": "folder_bundle",
+                "path": row["normalized_path"],
+                "content_hash": row["content_hash"],
+            },
+        }
+        for row in file_rows
+        if row.get("status") == "pending" and row.get("text")
+    ]
+    combined = "\n".join(row["content_hash"] for row in sorted(file_rows, key=lambda item: item["normalized_path"]))
+    version = content_hash(combined)
+    meta = {
+        "source": "folder_bundle",
+        "original_filename": config.get("original_filename", "upload.zip"),
+        "zip_size_bytes": config.get("zip_size_bytes", 0),
+        "file_count": len(file_rows),
+        "unsupported_file_count": sum(1 for row in file_rows if row.get("status") == "unsupported"),
+        "parser_warning_count": sum(1 for row in file_rows if row.get("warnings_json")),
+        "manifest_file_rows": file_rows,
+    }
+    return docs, version, "content_hash", meta
+
+
+def _manifest_input(row: dict) -> dict:
+    return {
+        "normalized_path": row["normalized_path"],
+        "content_hash": row["content_hash"],
+        "size_bytes": int(row.get("size_bytes") or 0),
+        "display_path": row.get("display_path"),
+        "mime_type": row.get("mime_type"),
+        "parser": row.get("parser"),
+        "parser_version": row.get("parser_version"),
+        "extraction_policy_hash": row.get("extraction_policy_hash"),
+        "status": row.get("status") or "pending",
+        "section_count": int(row.get("section_count") or 0),
+        "warnings_json": list(row.get("warnings_json") or []),
+    }
+
+
 # --- orchestration ---------------------------------------------------------
 
 def _language_for_path(path: str | None) -> str | None:
@@ -994,6 +1078,8 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
         docs, version, version_kind, meta = fetch_url_document(resource)
     elif rtype in UPLOAD_TYPES:
         docs, version, version_kind, meta = _collect_upload(resource)
+    elif rtype in FOLDER_BUNDLE_TYPES:
+        docs, version, version_kind, meta = _collect_folder_bundle(resource)
     elif rtype in DOCUMENT_TYPES:
         docs, version, version_kind, meta = _collect_documents(resource)
     else:
@@ -1002,6 +1088,10 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
         docs, version, version_kind, meta = _collect_documents(resource)
         if not docs:
             raise RuntimeError(f"unsupported resource type for ingestion: {resource.type!r}")
+
+    manifest_file_rows: list[dict] = []
+    if rtype in FOLDER_BUNDLE_TYPES:
+        manifest_file_rows = list(meta.pop("manifest_file_rows", []))
 
     docs, redaction_counts = redact_documents(docs)
     if redaction_counts:
@@ -1029,7 +1119,7 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
     )
     chunks_created = 0
     symbols_created = 0
-    if resource.type.lower() == "git":
+    if rtype in GIT_TYPES | FOLDER_BUNDLE_TYPES:
         for doc in docs:
             path = validate_snapshot_path(str(doc.get("path") or doc.get("title") or f"document-{len(docs)}.txt"))
             doc_hash = content_hash(doc["content"])
@@ -1097,6 +1187,15 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
     snapshot.status = "succeeded"
     snapshot.indexed_at = datetime.now(UTC)
     graph_stats = build_graph_index(session, resource, snapshot, docs)
+    if rtype in FOLDER_BUNDLE_TYPES:
+        create_resource_manifest(
+            session,
+            workspace_id=resource.workspace_id,
+            project_id=resource.project_id,
+            resource_id=resource.id,
+            source_snapshot_id=snapshot.id,
+            files=[ManifestFileInput(**_manifest_input(row)) for row in manifest_file_rows],
+        )
     run.documents_seen = len(docs)
     run.chunks_created = chunks_created
     run.symbols_created = symbols_created

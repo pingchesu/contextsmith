@@ -13,9 +13,20 @@ from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError
@@ -42,6 +53,7 @@ from contextsmith_api.constants import (
     ACTIVE_INDEX_STATUSES,
     ALLOWED_TOKEN_SCOPES,
     COMMON_AGENT_INSTRUCTION,
+    FOLDER_BUNDLE_RESOURCE_TYPES,
     RUNTIME_INSTRUCTIONS,
     UPLOAD_RESOURCE_TYPES,
     URL_RESOURCE_TYPES,
@@ -97,6 +109,7 @@ from contextsmith_api.schemas import (
     ContextPacketRequest,
     CurrentUserResponse,
     DueRefreshResponse,
+    FolderBundleUploadResponse,
     GeneratePatchRequest,
     GitResourceEnvRead,
     GitResourceEnvUpdate,
@@ -123,6 +136,8 @@ from contextsmith_api.schemas import (
     RemoteSearchCodeResponse,
     RepoAgentBriefRead,
     ResourceCreate,
+    ResourceManifestFileRead,
+    ResourceManifestRead,
     ResourceRead,
     ResourceReviewItem,
     ResourceReviewRequest,
@@ -172,6 +187,8 @@ from contextsmith_shared.models import (
     PrRequest,
     QueryRun,
     Resource,
+    ResourceManifest,
+    ResourceManifestFile,
     RetrievalEvalItem,
     RetrievalEvalRun,
     RetrievalHit,
@@ -181,11 +198,19 @@ from contextsmith_shared.models import (
     Workspace,
     WorkspaceMembership,
 )
+from contextsmith_worker.bundle_ingest import (
+    HARD_MAX_ZIP_UPLOAD_BYTES,
+    ZipRejectionError,
+    cleanup_stale_uploads,
+    validate_upload_staging_dir,
+    validate_zip_before_extract,
+)
 from contextsmith_worker.ingestion import (
     DEFAULT_MAX_DOCUMENT_BYTES,
     DEFAULT_MAX_URL_BYTES,
     HARD_MAX_DOCUMENT_BYTES,
     HARD_MAX_URL_BYTES,
+    _work_base,
     parse_positive_int,
     sanitize_remote_url,
     validate_base64_size,
@@ -1139,6 +1164,8 @@ def _validate_source_config(resource_type: str, uri: str, source_config: dict) -
                 validate_base64_size(config["base64"], max_bytes=max_document_bytes)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if rtype in FOLDER_BUNDLE_RESOURCE_TYPES:
+        raise HTTPException(status_code=422, detail="folder bundles must be created through the zip upload endpoint")
     return config
 
 
@@ -2349,6 +2376,159 @@ def create_resource(
     return resource
 
 
+def _manifest_read(manifest: ResourceManifest, files: list[ResourceManifestFile]) -> ResourceManifestRead:
+    return ResourceManifestRead(
+        id=manifest.id,
+        resource_id=manifest.resource_id,
+        source_snapshot_id=manifest.source_snapshot_id,
+        manifest_hash=manifest.manifest_hash,
+        file_count=manifest.file_count,
+        total_bytes=manifest.total_bytes,
+        parser_warning_count=manifest.parser_warning_count,
+        unsupported_file_count=manifest.unsupported_file_count,
+        created_at=manifest.created_at,
+        files=[
+            ResourceManifestFileRead(
+                id=file.id,
+                normalized_path=file.normalized_path,
+                display_path=file.display_path,
+                size_bytes=file.size_bytes,
+                content_hash=file.content_hash,
+                mime_type=file.mime_type,
+                status=file.status,
+                warnings_json=file.warnings_json or [],
+            )
+            for file in files
+        ],
+    )
+
+
+@app.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/resources/upload-folder-bundle",
+    response_model=FolderBundleUploadResponse,
+    status_code=202,
+)
+def upload_folder_bundle(
+    workspace_id: UUID,
+    project_id: UUID,
+    name: str = Form(min_length=1),
+    update_frequency: str = Form(default="manual"),
+    zip_file: UploadFile = File(...),
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> FolderBundleUploadResponse:
+    user = principal.user
+    require_scope(principal, "resource:write")
+    require_scope(principal, "resource:refresh")
+    if principal.api_token is not None and principal.api_token.allowed_resource_ids is not None:
+        raise HTTPException(status_code=403, detail="resource-scoped tokens cannot create new resources")
+    _require_project_member(session, workspace_id, project_id, principal)
+    if update_frequency != "manual":
+        raise HTTPException(status_code=422, detail="folder bundle uploads are manual-only in A2; re-upload a new zip to update")
+
+    work_base = _work_base()
+    try:
+        upload_dir = validate_upload_staging_dir(work_base)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    cleanup_stale_uploads(work_base)
+    original_filename = os.path.basename(zip_file.filename or "upload.zip") or "upload.zip"
+    staged_path = upload_dir / f"{uuid4()}.zip"
+    incoming_path = upload_dir / f".incoming-{staged_path.name}"
+    total_bytes = 0
+    try:
+        with open(incoming_path, "wb") as fh:
+            while True:
+                chunk = zip_file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > HARD_MAX_ZIP_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="folder bundle zip exceeds upload size limit")
+                fh.write(chunk)
+        if total_bytes == 0:
+            raise HTTPException(status_code=422, detail="folder bundle zip is empty")
+        with open(incoming_path, "rb") as fh:
+            magic = fh.read(4)
+        if not magic.startswith(b"PK"):
+            raise HTTPException(status_code=422, detail="folder bundle upload must be a zip archive")
+        try:
+            validate_zip_before_extract(incoming_path)
+        except ZipRejectionError as exc:
+            detail = f"zip rejected: {exc.reason}"
+            if exc.detail:
+                detail = f"{detail}: {exc.detail}"
+            raise HTTPException(status_code=422, detail=detail) from exc
+        os.replace(incoming_path, staged_path)
+    except HTTPException:
+        try:
+            os.unlink(incoming_path)
+        except OSError:
+            pass
+        raise
+
+    resource = Resource(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        type=next(iter(FOLDER_BUNDLE_RESOURCE_TYPES)),
+        name=name,
+        uri=f"folder-bundle://{original_filename}",
+        update_frequency=update_frequency,
+        source_config={
+            "staged_zip_path": str(staged_path),
+            "original_filename": original_filename,
+            "zip_size_bytes": total_bytes,
+        },
+        created_by=user.id,
+    )
+    session.add(resource)
+    session.flush()
+    resource.next_refresh_at = compute_next_refresh_at(resource)
+    run = IndexRun(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        resource_id=resource.id,
+        trigger="upload",
+        status="enqueueing",
+    )
+    session.add(run)
+    session.flush()
+    session.add(
+        AuditEvent(
+            workspace_id=workspace_id,
+            actor_user_id=user.id,
+            actor_token_id=principal.token_id,
+            action="resource.upload",
+            target_type="resource",
+            target_id=resource.id,
+            meta={"index_run_id": str(run.id), "zip_size_bytes": total_bytes},
+        )
+    )
+    session.commit()
+    queue = Queue("default", connection=Redis.from_url(get_settings().redis_url))
+    try:
+        queue.enqueue("contextsmith_worker.jobs.run_index", str(run.id), job_timeout=600)
+    except Exception as exc:
+        try:
+            os.unlink(staged_path)
+        except OSError:
+            pass
+        resource.status = "error"
+        resource.deleted_at = datetime.now(UTC)
+        run.status = "failed"
+        run.error_message = f"failed to enqueue index job: {exc}"[:1000]
+        session.add_all([resource, run])
+        session.commit()
+        raise HTTPException(status_code=503, detail="failed to enqueue index job") from exc
+    run.status = "queued"
+    session.add(run)
+    session.commit()
+    return FolderBundleUploadResponse(
+        resource=ResourceRead.model_validate(resource),
+        index_run=IndexRunRead.model_validate(run),
+    )
+
+
 @app.get(
     "/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}",
     response_model=ResourceRead,
@@ -2363,6 +2543,47 @@ def get_resource(
     require_scope(principal, "resource:read")
     _require_project_access(session, workspace_id, project_id, principal)
     return _resolve_resource(session, workspace_id, project_id, resource_id, principal)
+
+
+@app.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/manifest",
+    response_model=ResourceManifestRead,
+)
+def get_resource_manifest(
+    workspace_id: UUID,
+    project_id: UUID,
+    resource_id: UUID,
+    principal: Principal = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> ResourceManifestRead:
+    require_scope(principal, "resource:read")
+    _require_project_access(session, workspace_id, project_id, principal)
+    resource = _resolve_resource(session, workspace_id, project_id, resource_id, principal)
+    if resource.current_snapshot_id is None:
+        raise HTTPException(status_code=404, detail="resource manifest not found")
+    manifest = session.scalar(
+        select(ResourceManifest).where(
+            ResourceManifest.workspace_id == workspace_id,
+            ResourceManifest.project_id == project_id,
+            ResourceManifest.resource_id == resource_id,
+            ResourceManifest.source_snapshot_id == resource.current_snapshot_id,
+        )
+    )
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="resource manifest not found")
+    files = list(
+        session.scalars(
+            select(ResourceManifestFile)
+            .where(
+                ResourceManifestFile.workspace_id == workspace_id,
+                ResourceManifestFile.project_id == project_id,
+                ResourceManifestFile.resource_id == resource_id,
+                ResourceManifestFile.resource_manifest_id == manifest.id,
+            )
+            .order_by(ResourceManifestFile.normalized_path.asc())
+        )
+    )
+    return _manifest_read(manifest, files)
 
 
 @app.post(
@@ -2382,6 +2603,8 @@ def refresh_resource(
     require_scope(principal, "resource:refresh")
     _require_project_member(session, workspace_id, project_id, principal)
     resource = _resolve_resource(session, workspace_id, project_id, resource_id, principal)
+    if resource.type.lower() in FOLDER_BUNDLE_RESOURCE_TYPES:
+        raise HTTPException(status_code=422, detail="folder bundle resources are updated by uploading a new zip, not by refresh")
     run = IndexRun(
         workspace_id=workspace_id,
         project_id=project_id,
@@ -2535,6 +2758,8 @@ def update_resource(
     fields = payload.model_dump(exclude_unset=True)
     if resource.archived_at is not None and fields.get("retrieval_enabled") is True:
         raise HTTPException(status_code=409, detail="archived resources cannot be re-enabled")
+    if resource.type.lower() in FOLDER_BUNDLE_RESOURCE_TYPES and fields.get("update_frequency") not in (None, "manual"):
+        raise HTTPException(status_code=422, detail="folder bundle resources are manual-only; upload a new zip to update")
     nullable_rejected = {"name", "uri", "update_frequency", "source_config"}
     for key, value in fields.items():
         if key in nullable_rejected and value is None:
