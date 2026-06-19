@@ -21,6 +21,7 @@ ACTIVE_INDEX_STATUSES = {"enqueueing", "queued", "running"}
 # Resource ``type`` values routed through ingestion connectors.
 URL_RESOURCE_TYPES = {"url", "web", "webpage", "website", "http", "https"}
 UPLOAD_RESOURCE_TYPES = {"upload", "uploaded_file", "file_upload"}
+FOLDER_BUNDLE_RESOURCE_TYPES = {"folder_bundle"}
 
 # Runtime context instructions.
 COMMON_AGENT_INSTRUCTION = (

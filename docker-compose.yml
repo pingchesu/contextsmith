@@ -57,8 +57,11 @@ services:
       CONTEXTSMITH_RERANK_TIMEOUT: ${CONTEXTSMITH_RERANK_TIMEOUT:-30}
       CONTEXTSMITH_ALLOW_LOCAL_GIT: ${CONTEXTSMITH_ALLOW_LOCAL_GIT:-true}
       CONTEXTSMITH_CORS_ORIGINS: ${CONTEXTSMITH_CORS_ORIGINS:-http://localhost:13000,http://127.0.0.1:13000}
+      CONTEXTSMITH_WORK_DIR: ${CONTEXTSMITH_WORK_DIR:-/var/lib/contextsmith/work}
     ports:
     - ${CONTEXTSMITH_API_PORT:-18000}:8000
+    volumes:
+    - contextsmith_work:/var/lib/contextsmith/work
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,8 +109,10 @@ services:
       CONTEXTSMITH_RERANK_TIMEOUT: ${CONTEXTSMITH_RERANK_TIMEOUT:-30}
       CONTEXTSMITH_ALLOW_LOCAL_GIT: ${CONTEXTSMITH_ALLOW_LOCAL_GIT:-true}
       CONTEXTSMITH_CORS_ORIGINS: ${CONTEXTSMITH_CORS_ORIGINS:-http://localhost:13000,http://127.0.0.1:13000}
+      CONTEXTSMITH_WORK_DIR: ${CONTEXTSMITH_WORK_DIR:-/var/lib/contextsmith/work}
     volumes:
     - ./tmp/qa-git-fixtures:/qa-fixtures:ro
+    - contextsmith_work:/var/lib/contextsmith/work
     depends_on:
       api:
         condition: service_healthy
@@ -145,6 +150,9 @@ services:
       CONTEXTSMITH_RERANK_TIMEOUT: ${CONTEXTSMITH_RERANK_TIMEOUT:-30}
       CONTEXTSMITH_ALLOW_LOCAL_GIT: ${CONTEXTSMITH_ALLOW_LOCAL_GIT:-true}
       CONTEXTSMITH_CORS_ORIGINS: ${CONTEXTSMITH_CORS_ORIGINS:-http://localhost:13000,http://127.0.0.1:13000}
+      CONTEXTSMITH_WORK_DIR: ${CONTEXTSMITH_WORK_DIR:-/var/lib/contextsmith/work}
+    volumes:
+    - contextsmith_work:/var/lib/contextsmith/work
     depends_on:
       api:
         condition: service_healthy
@@ -175,3 +183,4 @@ services:
       start_period: 10s
 volumes:
   postgres_data: null
+  contextsmith_work: null

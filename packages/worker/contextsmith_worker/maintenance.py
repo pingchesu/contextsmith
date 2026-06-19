@@ -24,6 +24,7 @@ from contextsmith_shared.lifecycle import (
 from contextsmith_shared.models import AuditEvent, IndexRun, Resource
 
 ACTIVE_INDEX_STATUSES = {"enqueueing", "queued", "running"}
+NON_REFRESHABLE_TYPES = {"folder_bundle"}
 
 
 def _has_active_index_run(session: Session, resource: Resource) -> bool:
@@ -69,6 +70,7 @@ def enqueue_due_refreshes(
             Resource.status != "archived",
             Resource.retrieval_enabled.is_(True),
             Resource.update_frequency != "manual",
+            Resource.type.not_in(NON_REFRESHABLE_TYPES),
         ]
         if workspace_id is not None:
             predicates.append(Resource.workspace_id == workspace_id)

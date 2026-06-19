@@ -6,20 +6,21 @@ import { AgentContextPreview } from '../../components/AgentContextPreview';
 import { usePlatform } from '../../lib/platform-context';
 import { fmt, short } from '../../lib/api';
 import { freshnessLabel, isActive, isIndexFailed, isVisible, lifecycleStages, readiness } from '../../lib/lifecycle';
-import type { AgentContextResponse, GitResourceEnv, IndexRun, Resource, ReviewItem } from '../../lib/types';
+import type { AgentContextResponse, FolderBundleUploadResponse, GitResourceEnv, IndexRun, Resource, ResourceManifest, ReviewItem } from '../../lib/types';
 
-type ResourceType = 'git' | 'url' | 'markdown' | 'upload';
+type ResourceType = 'git' | 'url' | 'markdown' | 'upload' | 'folder_bundle';
 type GitDraft = { branch: string; clone_timeout: string; max_file_bytes: string; max_repo_files: string; max_repo_bytes: string; update_frequency: string };
 
 function defaultUri(type: ResourceType) {
   if (type === 'git') return 'https://github.com/owner/repo.git';
   if (type === 'url') return 'https://example.com/docs';
   if (type === 'markdown') return 'doc://runbook.md';
+  if (type === 'folder_bundle') return 'folder-bundle://upload.zip';
   return 'upload://notes.txt';
 }
 
 function defaultName(type: ResourceType) {
-  return type === 'git' ? 'New repo source' : type === 'url' ? 'New URL source' : type === 'markdown' ? 'New markdown source' : 'New upload source';
+  return type === 'git' ? 'New repo source' : type === 'url' ? 'New URL source' : type === 'markdown' ? 'New markdown source' : type === 'folder_bundle' ? 'New folder bundle' : 'New upload source';
 }
 
 function toGitDraft(env: GitResourceEnv | null): GitDraft {
@@ -76,6 +77,7 @@ export default function SourcesPage() {
   const [frequency, setFrequency] = useState('daily');
   const [content, setContent] = useState('');
   const [filename, setFilename] = useState('notes.txt');
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const [refreshNow, setRefreshNow] = useState(true);
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -87,6 +89,8 @@ export default function SourcesPage() {
   const [preview, setPreview] = useState<AgentContextResponse | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<ResourceManifest | null>(null);
+  const [manifestError, setManifestError] = useState<string | null>(null);
 
   // Git environment state.
   const [gitEnv, setGitEnv] = useState<GitResourceEnv | null>(null);
@@ -99,9 +103,10 @@ export default function SourcesPage() {
   const selectedReview = selectedResource ? reviewByResource.get(selectedResource.id) : undefined;
   const lastIndexStatus = indexRuns[0]?.status ?? selectedReview?.last_index_status ?? null;
   const isGit = selectedResource?.type === 'git';
+  const isFolderBundle = selectedResource?.type === 'folder_bundle';
 
   // Reset detail-scoped state when selection changes.
-  useEffect(() => { setPreview(null); setPreviewError(null); setActionError(null); setGitEnvSaved(false); }, [selectedResourceId]);
+  useEffect(() => { setPreview(null); setPreviewError(null); setActionError(null); setGitEnvSaved(false); setManifest(null); setManifestError(null); }, [selectedResourceId]);
 
   // Load git env for the selected git source.
   useEffect(() => {
@@ -115,16 +120,48 @@ export default function SourcesPage() {
     return () => { cancelled = true; };
   }, [client, selectedResource, settings.workspaceId, settings.projectId]);
 
+  useEffect(() => {
+    if (!selectedResource || selectedResource.type !== 'folder_bundle' || !selectedResource.current_snapshot_id) { setManifest(null); return; }
+    let cancelled = false;
+    setManifestError(null);
+    client<ResourceManifest>(`/workspaces/${settings.workspaceId}/projects/${settings.projectId}/resources/${selectedResource.id}/manifest`)
+      .then((value) => { if (!cancelled) setManifest(value); })
+      .catch((err) => { if (!cancelled) { setManifest(null); setManifestError(String(err)); } });
+    return () => { cancelled = true; };
+  }, [client, selectedResource, settings.workspaceId, settings.projectId]);
+
   function changeType(next: ResourceType) {
     setType(next);
     setUri(defaultUri(next));
     setName(defaultName(next));
+    if (next === 'folder_bundle') setFrequency('manual');
   }
 
   async function submitConnect(event: FormEvent) {
     event.preventDefault();
     setConnectBusy(true); setConnectError(null); setConnectResult(null);
     try {
+      if (type === 'folder_bundle') {
+        if (!zipFile) throw new Error('Choose a .zip folder bundle first.');
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('update_frequency', frequency);
+        formData.append('zip_file', zipFile);
+        const response = await fetch(`${settings.apiBaseUrl}/workspaces/${settings.workspaceId}/projects/${settings.projectId}/resources/upload-folder-bundle`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${settings.sessionToken}` },
+          body: formData,
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({ detail: 'upload failed' }));
+          throw new Error(typeof body.detail === 'string' ? body.detail : 'upload failed');
+        }
+        const data = await response.json() as FolderBundleUploadResponse;
+        setConnectResult(data.resource);
+        await reload();
+        await selectResource(data.resource.id);
+        return;
+      }
       const source_config = type === 'git'
         ? { url: uri, branch }
         : type === 'url'
@@ -195,7 +232,7 @@ export default function SourcesPage() {
 
   const stages = selectedResource ? lifecycleStages(selectedResource, selectedReview, lastIndexStatus) : [];
   const freshness = selectedResource ? freshnessLabel(selectedReview) : null;
-  const reindexLabel = isGit ? 'Update repo & reindex' : 'Reindex';
+  const reindexLabel = isGit ? 'Update repo & reindex' : isFolderBundle ? 'Upload new zip to update' : 'Reindex';
 
   return <main className="page">
     <PageHeader
@@ -226,13 +263,16 @@ export default function SourcesPage() {
       <div className="section-card-head"><div><h2 className="section-card-title">Connect a source</h2><p className="muted section-card-desc">Pick a source type — only the fields it needs are shown. New sources appear in the list and are selected automatically.</p></div></div>
       <form className="grid two" onSubmit={submitConnect}>
         <div className="grid">
-          <Field label="Source type"><select className="input" value={type} onChange={(event) => changeType(event.target.value as ResourceType)}><option value="git">Git repository</option><option value="url">URL / web page</option><option value="markdown">Markdown / inline doc</option><option value="upload">Upload text</option></select></Field>
+          <Field label="Source type"><select className="input" value={type} onChange={(event) => changeType(event.target.value as ResourceType)}><option value="git">Git repository</option><option value="folder_bundle">Folder bundle (.zip)</option><option value="url">URL / web page</option><option value="markdown">Markdown / inline doc</option><option value="upload">Upload text</option></select></Field>
           <Field label="Name"><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></Field>
-          <Field label={type === 'git' ? 'Git URL' : type === 'url' ? 'URL' : 'URI / path'}><input className="input" value={uri} onChange={(event) => setUri(event.target.value)} /></Field>
+          {type !== 'folder_bundle' ? <Field label={type === 'git' ? 'Git URL' : type === 'url' ? 'URL' : 'URI / path'}><input className="input" value={uri} onChange={(event) => setUri(event.target.value)} /></Field> : null}
           {type === 'git' ? <div className="grid two"><Field label="Branch"><input className="input" value={branch} onChange={(event) => setBranch(event.target.value)} /></Field></div> : null}
+          {type === 'folder_bundle' ? <Field label="Folder bundle zip"><input className="input" type="file" accept=".zip,application/zip" onChange={(event) => setZipFile(event.target.files?.[0] ?? null)} /><div className="muted">Upload a zipped folder. ContextSmith validates paths and archives before indexing.</div></Field> : null}
           {type === 'upload' ? <Field label="Filename"><input className="input" value={filename} onChange={(event) => setFilename(event.target.value)} /></Field> : null}
           {type === 'markdown' || type === 'upload' ? <Field label="Content"><textarea className="input" rows={8} value={content} onChange={(event) => setContent(event.target.value)} /></Field> : null}
-          <div className="grid two"><Field label="Update frequency"><select className="input" value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="manual">manual</option><option value="hourly">hourly</option><option value="daily">daily</option><option value="weekly">weekly</option></select></Field><label className={`scope-pill ${refreshNow ? 'active' : ''}`}><input type="checkbox" checked={refreshNow} onChange={(event) => setRefreshNow(event.target.checked)} /> Create index immediately</label></div>
+          {type === 'folder_bundle'
+            ? <div className="notice">Folder bundles are manual in this milestone. Upload a new zip when the folder changes.</div>
+            : <div className="grid two"><Field label="Update frequency"><select className="input" value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="manual">manual</option><option value="hourly">hourly</option><option value="daily">daily</option><option value="weekly">weekly</option></select></Field><label className={`scope-pill ${refreshNow ? 'active' : ''}`}><input type="checkbox" checked={refreshNow} onChange={(event) => setRefreshNow(event.target.checked)} /> Create index immediately</label></div>}
           <button className="btn" disabled={connectBusy}>{connectBusy ? 'Connecting…' : 'Connect source'}</button>
         </div>
         <div className="grid">
@@ -268,7 +308,7 @@ export default function SourcesPage() {
           </table></div>}
       </SectionCard>
 
-      <SectionCard title="Source detail" description="Evidence and in-place maintenance for the selected source." action={selectedResource ? <button className="btn" disabled={refreshing || loading} onClick={() => void reindexSelected()}>{refreshing ? 'Working…' : reindexLabel}</button> : undefined}>
+      <SectionCard title="Source detail" description="Evidence and in-place maintenance for the selected source." action={selectedResource ? <button className="btn" disabled={refreshing || loading || isFolderBundle} onClick={() => void reindexSelected()}>{refreshing ? 'Working…' : reindexLabel}</button> : undefined}>
         {!selectedResource
           ? <EmptyState text="Select a source from the list to inspect its lifecycle, snapshots, index runs, graph, and generated context." />
           : <div className="grid">
@@ -283,6 +323,16 @@ export default function SourcesPage() {
               <div><div className="label">Retrieval</div><Chip tone={selectedResource.retrieval_enabled ? 'ready' : 'warn'}>{selectedResource.retrieval_enabled ? 'enabled' : 'off'}</Chip></div>
             </div>
             <div><div className="label">Source location</div><div className="muted">{selectedResource.uri}</div></div>
+            {selectedResource.type === 'folder_bundle' ? <div className="notice">
+              <strong>Folder manifest</strong>
+              {manifest ? <div className="grid three" style={{ marginTop: 8 }}>
+                <Metric label="Files" value={manifest.file_count} />
+                <Metric label="Unsupported" value={manifest.unsupported_file_count} />
+                <Metric label="Warnings" value={manifest.parser_warning_count} />
+              </div> : <div className="muted" style={{ marginTop: 8 }}>{manifestError ? `Manifest unavailable: ${manifestError}` : 'Manifest will appear after indexing completes.'}</div>}
+              {manifest ? <div className="muted" style={{ marginTop: 6 }}>{manifest.total_bytes.toLocaleString()} bytes scanned from the uploaded zip.</div> : null}
+              {manifest ? <div className="table-wrap" style={{ marginTop: 8 }}><table><thead><tr><th>Path</th><th>Status</th><th>Warnings</th><th>Size</th></tr></thead><tbody>{manifest.files.slice(0, 8).map((file) => <tr key={file.id}><td><span className="code">{file.normalized_path}</span></td><td><StatusChip value={file.status} /></td><td>{file.warnings_json.length ? file.warnings_json.join('; ') : <span className="muted">—</span>}</td><td>{file.size_bytes.toLocaleString()}</td></tr>)}</tbody></table></div> : null}
+            </div> : null}
             <div><div className="label">Last refresh</div><div className="muted">{fmt(selectedResource.last_refresh_finished_at)}</div></div>
             {actionError ? <div className="notice error">{actionError}</div> : null}
           </div>}

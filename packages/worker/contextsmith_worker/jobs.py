@@ -8,7 +8,8 @@ from sqlalchemy import select
 from contextsmith_shared.db import get_sessionmaker
 from contextsmith_shared.lifecycle import compute_next_refresh_at
 from contextsmith_shared.models import IndexRun, Resource
-from contextsmith_worker.ingestion import ingest_resource
+from contextsmith_worker.bundle_ingest import cleanup_stale_uploads
+from contextsmith_worker.ingestion import _work_base, ingest_resource
 
 
 def run_index(index_run_id: str) -> None:
@@ -23,6 +24,7 @@ def run_index(index_run_id: str) -> None:
     session = get_sessionmaker()()
     try:
         run = session.scalar(select(IndexRun).where(IndexRun.id == UUID(index_run_id)))
+        cleanup_stale_uploads(_work_base())
         if run is None:
             raise RuntimeError(f"index_run not found: {index_run_id}")
         run.status = "running"
