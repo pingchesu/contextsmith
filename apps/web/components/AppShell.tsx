@@ -24,8 +24,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Assure quality',
     items: [
-      { href: '/review', label: 'Review queue' },
-      { href: '/evals', label: 'Retrieval evals' },
+      { href: '/quality', label: 'Quality' },
     ],
   },
   {
