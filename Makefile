@@ -17,7 +17,22 @@ WEB_URL ?= http://localhost:$(SOURCEBRIEF_WEB_PORT)
 DATABASE_URL ?= $(if $(SOURCEBRIEF_DATABASE_URL),$(SOURCEBRIEF_DATABASE_URL),$(if $(CONTEXTSMITH_DATABASE_URL),$(CONTEXTSMITH_DATABASE_URL),postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(SOURCEBRIEF_POSTGRES_PORT)/$(POSTGRES_DB)))
 export PYTHONPATH := apps/api:packages/shared:packages/worker
 
-.PHONY: venv web-deps lint typecheck test test-integration compose-up compose-down compose-ps compose-logs migrate migrate-compose qa-smoke alpha-eval release-gate verify clean prepare-qa-fixtures
+.PHONY: help venv web-deps lint typecheck test test-integration compose-up compose-down compose-ps compose-logs migrate migrate-compose qa-smoke alpha-eval release-gate verify clean prepare-qa-fixtures
+
+help:
+	@printf 'SourceBrief common commands\n\n'
+	@printf '  make compose-up        Build/start API, workers, web, Postgres, and Redis\n'
+	@printf '  make compose-down      Stop local services and remove orphan containers\n'
+	@printf '  make compose-ps        Show local service status\n'
+	@printf '  make compose-logs      Tail API, worker, and frontend logs\n'
+	@printf '  make migrate           Run Alembic migrations from the host venv\n'
+	@printf '  make qa-smoke          Run the real API/worker/frontend smoke flow\n'
+	@printf '  make lint              Python lint plus frontend typecheck\n'
+	@printf '  make typecheck         Backend mypy plus frontend typecheck\n'
+	@printf '  make test              Unit tests\n'
+	@printf '  make test-integration  Integration tests against real services\n'
+	@printf '  make verify            Full local acceptance/release gate\n'
+	@printf '  make clean             Remove local Python/tool caches\n'
 
 venv:
 	uv venv --python 3.11 --allow-existing $(VENV)

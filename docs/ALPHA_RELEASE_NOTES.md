@@ -23,8 +23,8 @@ SourceBrief alpha is an open-source, multi-tenant, project-based context platfor
 - Lexical, vector, graph-aware, and rerank retrieval paths.
 - Providerized embeddings/rerank with deterministic local defaults.
 - Provider health endpoint and embedding namespace drift diagnostics.
-- Context packets and runtime-specific `agent-context` API with usage accounting.
-- Central MCP endpoint exposing context retrieval only.
+- Runtime-specific `agent-context` API with usage accounting.
+- Central MCP endpoint exposing context/source-intelligence tools plus opt-in patch proposal and PR approval records.
 
 ### SaaS/ops surface
 
@@ -56,6 +56,7 @@ SourceBrief alpha is an open-source, multi-tenant, project-based context platfor
 
 ```bash
 cp .env.example .env
+# edit SOURCEBRIEF_ADMIN_PASSWORD before first startup
 make release-gate
 ```
 

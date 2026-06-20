@@ -1,10 +1,12 @@
 # Quick start
 
-This guide gets SourceBrief running locally with the real services used by the test suite.
+This guide gets SourceBrief running locally and gets you to the first useful product moment: a source connected to the web console and ready for cited context queries.
+
+For the full contributor/release gate, skip to [Full verification](#full-verification). It is intentionally heavier than the quick start.
 
 ## Prerequisites
 
-Install these first:
+Install:
 
 - Docker with Compose
 - Python 3.11
@@ -24,69 +26,39 @@ npm --version
 git --version
 ```
 
-## Clone
+## 1. Clone and configure
 
 ```bash
 git clone https://github.com/pingchesu/sourcebrief.git
 cd sourcebrief
-```
 
-## Configure environment
-
-Create a local `.env` before starting Docker Compose. The API bootstraps the first administrator from `SOURCEBRIEF_ADMIN_EMAIL` and `SOURCEBRIEF_ADMIN_PASSWORD`, so clean installs need those values present:
-
-```bash
 cp .env.example .env
-# edit SOURCEBRIEF_ADMIN_PASSWORD before first startup
 ```
 
-The template keeps the local deterministic hashing/term-overlap providers enabled. It also documents the admin bootstrap account, local ports, browser-visible API URL, and optional HuggingFace/vLLM/SGLang/OpenAI-compatible embedding and rerank endpoints.
+Before the first startup, edit `.env` and replace the example admin password:
 
-`make` and Docker Compose both read `.env`. If you change frontend/API ports, also update `NEXT_PUBLIC_API_BASE_URL` and `SOURCEBRIEF_CORS_ORIGINS`, then rebuild with `docker compose up -d --build` because the browser API URL is compiled into the Next.js client.
+```env
+SOURCEBRIEF_ADMIN_EMAIL=admin@sourcebrief.local
+SOURCEBRIEF_ADMIN_PASSWORD=<choose-a-local-password>
+```
 
-## Run the full acceptance gate
+Keep this default unless you explicitly want local header auth for CLI experiments:
+
+```env
+SOURCEBRIEF_DEV_AUTH=false
+```
+
+If you change ports or `NEXT_PUBLIC_API_BASE_URL`, rebuild the frontend with `docker compose up -d --build`; the browser-visible API URL is compiled into the Next.js client.
+
+## 2. Start the local stack
 
 ```bash
-make verify
+make compose-up
+until curl -fsS http://localhost:18000/readyz; do sleep 2; done
+until curl -fsS http://localhost:13000/api/health; do sleep 2; done
 ```
 
-This command does the full local path:
-
-1. creates `.venv` with Python 3.11
-2. installs Python dev dependencies
-3. installs frontend dependencies
-4. runs Python lint
-5. runs backend mypy typecheck
-6. runs frontend typecheck
-7. runs unit tests
-8. builds and starts Docker services
-9. runs host and container Alembic migrations
-10. runs integration tests against real Postgres/Redis/API behavior
-11. runs the QA smoke flow
-12. runs alpha evaluation and writes `artifacts/alpha-eval-report.json`
-
-`make verify` is an alias for the full release gate:
-
-```bash
-make release-gate
-```
-
-It runs lint/typecheck, unit tests, integration tests, host/container migrations, real-service QA smoke, and alpha eval. Expected final smoke/eval output includes:
-
-```text
-QA smoke passed: document+git ingestion → snapshots → chunks → embeddings → code symbols → graph index → lexical/hybrid/GraphRAG context retrieval with citations, CLI search, agent profile, web console homepage/token flow, provider health/namespace diagnostics, query/resource usage analytics, review lifecycle, scheduled refresh dry-run, restore/purge lifecycle, upload connector redaction, agent-context API, central MCP context tool, Hermes integration script, index-run logs, audit events, RQ worker, auth denial (read+search), frontend health
-Alpha eval passed: 3 golden questions, report=artifacts/alpha-eval-report.json
-```
-
-## Open the local services
-
-After `make verify` or `make compose-up`, use:
-
-- API health: <http://localhost:18000/healthz>
-- API readiness: <http://localhost:18000/readyz>
-- Web UI: <http://localhost:13000>
-
-Local service ports:
+This starts:
 
 | Service | URL / port |
 | --- | --- |
@@ -94,6 +66,111 @@ Local service ports:
 | Web | `http://localhost:13000` |
 | PostgreSQL | `localhost:55432` |
 | Redis | `localhost:6380` |
+
+The API container runs migrations automatically in Compose through `SOURCEBRIEF_AUTO_MIGRATE=true`.
+
+## 3. Open the web console
+
+Open:
+
+```text
+http://localhost:13000/login
+```
+
+Sign in with the admin account from `.env`:
+
+```text
+SOURCEBRIEF_ADMIN_EMAIL
+SOURCEBRIEF_ADMIN_PASSWORD
+```
+
+You should land in the SourceBrief console with a default workspace and project.
+
+## 4. Add your first source
+
+Use the UI first; it is the clearest product path.
+
+1. Open **Sources**.
+2. Add a small Git repo, Markdown document, URL, upload, or zip folder bundle.
+3. Start indexing if the UI does not start it automatically.
+4. Wait for the resource to reach an indexed/retrieval-ready state.
+5. Open **Workbench** and ask a question about that source.
+6. Expand the citations. A useful result should point back to source paths, line ranges, document hashes, snapshots, or commits.
+
+The product is working when the answer is not just plausible. It should be inspectable.
+
+## 5. CLI experiments
+
+The CLI exists for local automation and agent integration tests. It supports two auth modes:
+
+- bearer token: `SOURCEBRIEF_TOKEN` or `--token`
+- local development header auth: `SOURCEBRIEF_DEV_AUTH=true` plus `SOURCEBRIEF_EMAIL`
+
+The default `.env.example` has `SOURCEBRIEF_DEV_AUTH=false`, so this local demo requires opting in before startup:
+
+```env
+SOURCEBRIEF_DEV_AUTH=true
+```
+
+Then restart the stack and run:
+
+```bash
+make compose-up
+make venv
+export PATH="$PWD/.venv/bin:$PATH"
+export SOURCEBRIEF_API_URL=http://localhost:18000
+export SOURCEBRIEF_EMAIL=demo@example.com
+
+sourcebrief health
+sourcebrief --help
+```
+
+Create a workspace/project and import a public repo:
+
+```bash
+WORKSPACE_ID=$(sourcebrief --json workspace create --name Demo --slug "demo-$(date +%s)" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+PROJECT_ID=$(sourcebrief --json project create --workspace-id "$WORKSPACE_ID" --name "Demo Project" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+RESOURCE_JSON=$(sourcebrief --json resource add-repo --workspace-id "$WORKSPACE_ID" --project-id "$PROJECT_ID" --name SourceBrief --repo-url https://github.com/pingchesu/sourcebrief.git --branch main --refresh --wait)
+RESOURCE_ID=$(printf '%s' "$RESOURCE_JSON" | python -c 'import json,sys; print(json.load(sys.stdin)["resource"]["id"])')
+
+sourcebrief agent-context \
+  --workspace-id "$WORKSPACE_ID" \
+  --project-id "$PROJECT_ID" \
+  --resource-id "$RESOURCE_ID" \
+  --runtime hermes \
+  --query "how does SourceBrief expose agent context?"
+```
+
+For shared or production-like deployments, do not use dev auth. Use a scoped API token instead.
+
+## Full verification
+
+Use this when contributing or validating a release candidate:
+
+```bash
+make verify
+```
+
+`make verify` is an alias for the full release gate. It runs:
+
+1. Python dev dependency install
+2. frontend dependency install
+3. Python lint
+4. backend mypy typecheck
+5. frontend typecheck
+6. unit tests
+7. Docker Compose build/start
+8. host and container Alembic migrations
+9. integration tests against real Postgres/Redis/API behavior
+10. QA smoke flow
+11. alpha evaluation, writing `artifacts/alpha-eval-report.json`
+
+Expected final output includes:
+
+```text
+QA smoke passed: document+git ingestion -> snapshots -> chunks -> embeddings -> code symbols -> graph index -> lexical/hybrid/GraphRAG context retrieval with citations, CLI search, agent profile, web console homepage/token flow, provider health/namespace diagnostics, query/resource usage analytics, review lifecycle, scheduled refresh dry-run, restore/purge lifecycle, upload connector redaction, agent-context API, central MCP context tool, index-run logs, audit events, RQ worker, auth denial, frontend health
+Alpha eval passed: 3 golden questions, report=artifacts/alpha-eval-report.json
+```
 
 ## Faster development loop
 
@@ -119,55 +196,11 @@ Clean local Python/tool caches:
 make clean
 ```
 
-## First indexed project and Hermes-style query
-
-After `make verify`, the stack has already exercised this path through `scripts/qa_smoke.py`. To run it yourself:
-
-```bash
-export SOURCEBRIEF_API_URL=http://localhost:18000
-export SOURCEBRIEF_EMAIL=demo@example.com
-export PATH="$PWD/.venv/bin:$PATH"
-
-WORKSPACE_ID=$(sourcebrief --json workspace create --name Demo --slug "demo-$(date +%s)" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-PROJECT_ID=$(sourcebrief --json project create --workspace-id "$WORKSPACE_ID" --name "Demo Project" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-RESOURCE_JSON=$(sourcebrief --json resource add-repo --workspace-id "$WORKSPACE_ID" --project-id "$PROJECT_ID" --name SourceBrief --repo-url https://github.com/pingchesu/sourcebrief.git --branch main --refresh --wait)
-RESOURCE_ID=$(printf '%s' "$RESOURCE_JSON" | python -c 'import json,sys; print(json.load(sys.stdin)["resource"]["id"])')
-
-sourcebrief agent-context \
-  --workspace-id "$WORKSPACE_ID" \
-  --project-id "$PROJECT_ID" \
-  --resource-id "$RESOURCE_ID" \
-  --runtime hermes \
-  --query "how does SourceBrief expose agent context?"
-```
-
-For Hermes MCP config/token validation:
-
-```bash
-python scripts/hermes_integration.py \
-  --api-url http://localhost:18000 \
-  --workspace-id "$WORKSPACE_ID" \
-  --project-id "$PROJECT_ID" \
-  --resource-id "$RESOURCE_ID" \
-  --query "agent-context API" \
-  --expect-text "agent-context"
-```
-
-## Dev authentication
-
-Local API requests use a development header:
-
-```bash
-X-User-Email: demo@example.com
-```
-
-The first request from an email creates or resolves the local user. Workspace and project membership still matter, so a different email cannot read your workspace/project unless it has membership.
-
 ## Troubleshooting
 
 ### Port already in use
 
-SourceBrief uses ports `18000`, `13000`, `55432`, and `6380`. Stop the conflicting process or edit `docker-compose.yml`.
+SourceBrief uses ports `18000`, `13000`, `55432`, and `6380` by default. Stop the conflicting process or override ports in `.env`.
 
 ### Docker services are stale
 
@@ -187,26 +220,19 @@ make migrate
 make test-integration
 ```
 
+### CLI returns `authentication required`
+
+You are probably using `SOURCEBRIEF_EMAIL` while `SOURCEBRIEF_DEV_AUTH=false`. Either:
+
+- use `SOURCEBRIEF_TOKEN`, or
+- set `SOURCEBRIEF_DEV_AUTH=true` in `.env`, restart the stack, and use `SOURCEBRIEF_EMAIL` only for local demos.
+
 ### Frontend dependency warnings
 
-`npm audit` may report moderate dependency warnings from the frontend stack. They do not block the current local MVP gate, but should be handled before public deployment.
+`npm audit` may report moderate dependency warnings from the frontend stack. They do not block the current local alpha gate, but should be handled before public deployment.
 
-## CLI check
+## Next steps
 
-The local package installs the `sourcebrief` CLI:
-
-```bash
-sourcebrief --help
-sourcebrief health
-```
-
-The CLI reads these environment variables:
-
-```bash
-export SOURCEBRIEF_API_URL=http://localhost:18000
-export SOURCEBRIEF_EMAIL=demo@example.com
-```
-
-## What next?
-
-After the stack is running, continue with [`docs/GUIDE.md`](GUIDE.md) to create a workspace, ingest a markdown resource or git repo, query it, and request an agent context packet.
+- Read [Concepts](CONCEPTS.md) for SourceBrief terminology.
+- Read [Guide](GUIDE.md) for API, CLI, Git resource, MCP, and review workflows.
+- Read [Operations](OPERATIONS.md) for logs, queues, migrations, and reset procedures.

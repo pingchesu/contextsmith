@@ -159,11 +159,16 @@ Implemented methods:
 - `tools/list`
 - `tools/call`
 
-Tool exposed:
+Core tool groups:
 
-- `sourcebrief.get_agent_context`
+- agent context retrieval: `sourcebrief.get_agent_context`
+- Context Pack and Resource Map inspection
+- cited section reads and source search
+- graph inventory/query/path traversal
+- indexed code search, grep, read-file, and symbol lookup
+- patch proposal / PR approval records where explicitly enabled
 
-This is intentionally not one MCP server per repo. A project is the boundary; a project can contain many repos and resources.
+This is intentionally not one MCP server per repo. A project is the boundary; a project can contain many repos and resources. SourceBrief exposes context/source intelligence plus guarded patch proposal and PR approval-record workflows through MCP; production mutations remain outside SourceBrief.
 
 ## Agent registry
 
@@ -206,7 +211,7 @@ This lets users clean up unused or stale context instead of blindly growing the 
 
 ## Security posture in the MVP
 
-Current local development uses `X-User-Email` as a dev auth header. The data model already has workspace and project membership boundaries, but production deployment still needs real auth, scoped API tokens, CSRF/CORS hardening, and deployment-specific secret handling.
+Current local CLI/test flows may use `X-User-Email` only when `SOURCEBRIEF_DEV_AUTH=true`. The alpha also includes email/password web login, session tokens, workspace memberships, and scoped workspace API tokens. It is still not public-internet hardened: production deployment needs SSO/SCIM or another real identity provider, CSRF/CORS review, deployment-specific secret handling, and operational hardening.
 
 Non-negotiable design rule:
 
@@ -216,7 +221,7 @@ Production actions should stay behind dedicated typed MCP tools, explicit approv
 
 ## Known hardening work
 
-- production auth and token scopes
+- production identity-provider integration beyond alpha email/password sessions and API tokens
 - scheduled refresh orchestration
 - production embedding/rerank provider adapters
 - richer review UI

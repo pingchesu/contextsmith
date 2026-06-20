@@ -1,15 +1,15 @@
 # Guide
 
-This guide walks through the main SourceBrief workflow with the CLI and the local API.
+This guide walks through the main SourceBrief workflow after the local stack is running. If you are new to the project, start with [Quick start](QUICKSTART.md) first.
 
 ## 1. Start the stack
 
 ```bash
 make compose-up
-make migrate
+until curl -fsS http://localhost:18000/readyz; do sleep 2; done
 ```
 
-Set shell helpers:
+Set shell helpers for this local walkthrough. These examples create a workspace, so they must use a user-authenticated request. For local demos, enable `SOURCEBRIEF_DEV_AUTH=true` in `.env` before startup and use the dev header:
 
 ```bash
 export API=http://localhost:18000
@@ -17,6 +17,8 @@ export AUTH='X-User-Email: demo@example.com'
 export SOURCEBRIEF_API_URL=$API
 export SOURCEBRIEF_EMAIL=demo@example.com
 ```
+
+Bearer API tokens are useful after a workspace exists, for project/resource/query/MCP flows. They cannot create workspaces.
 
 The examples below show curl first because it exposes the API shape. The same flow can be run through the CLI; see [CLI workflow](#cli-workflow) and [Git repository resources](#git-repository-resources).
 
@@ -266,7 +268,7 @@ curl -s -X POST "$API/workspaces/$WORKSPACE_ID/projects/$PROJECT_ID/resources" \
 
 Refresh it the same way as a markdown resource, then use search, context packets, code search, or agent-context requests.
 
-Local filesystem repos are disabled by default in workers. They can be enabled for controlled local smoke tests with `SOURCEBRIEF_ALLOW_LOCAL_GIT=true`, but public deployments should prefer public HTTPS remotes or a hardened connector.
+In the local Compose stack, filesystem Git repos are enabled by `.env.example` through `SOURCEBRIEF_ALLOW_LOCAL_GIT=true` so smoke tests and local demos can index `file://` fixtures. The worker's safer standalone default is disabled when that environment variable is absent. Public or shared deployments should prefer public HTTPS remotes or a hardened private-repo connector.
 
 ## CLI workflow
 
