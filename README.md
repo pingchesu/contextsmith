@@ -222,6 +222,7 @@ Architecture details live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The
 - [`docs/SPEC.md`](docs/SPEC.md) - full product and architecture specification
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) - finite alpha milestone roadmap after M1-M10
 - [`docs/GIT_REPO_IMPORT_PRODUCT_GAPS.md`](docs/GIT_REPO_IMPORT_PRODUCT_GAPS.md) - backlog for maturing Git repo import into an enterprise source onboarding flow
+- [`docs/context-artifact-compiler/C2-skill-pack-compiler-spec.md`](docs/context-artifact-compiler/C2-skill-pack-compiler-spec.md) - Skill Pack Compiler spec: source-aware package generation, playbooks, coverage, and real E2E value gates
 - [`docs/MILESTONE-1.md`](docs/MILESTONE-1.md) - foundation runtime
 - [`docs/MILESTONE-2.md`](docs/MILESTONE-2.md) - resource ingestion and lexical search
 - [`docs/MILESTONE-3.md`](docs/MILESTONE-3.md) - embeddings, hybrid retrieval, context packets
