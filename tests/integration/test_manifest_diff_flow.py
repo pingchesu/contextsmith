@@ -678,33 +678,77 @@ def test_skill_export_generation_approval_download_scope_and_purge(monkeypatch: 
     )
     assert leak_download.status_code == 403
 
+    safe_export_payload = {
+        "export_type": "hermes_skill",
+        "title": "Default runtime skill Alpha: Beta # Gamma https://alice:secret@example.com/org/repo.git?access_token=SECRET_QUERY_TOKEN#SECRET_FRAGMENT",
+        "summary": r"Use pinned SourceBrief runtime context from /Users/alice/private/sourcebrief C:\Users\alice\repo \\server\share\repo.",
+    }
     export = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/context-packs/default/versions/{published_pack.json()['version']}/skill-exports",
         headers=auth_headers(token),
-        json={"export_type": "hermes_skill", "title": "Default runtime skill", "summary": "Use pinned SourceBrief runtime context."},
+        json=safe_export_payload,
     )
     assert export.status_code == 200, export.text
     export_body = export.json()
     assert export_body["status"] == "draft"
     assert export_body["package_hash"].startswith("sha256:")
     file_names = {file["path"] for file in export_body["files"]}
-    assert {"SKILL.md", "README.md", "manifest.json"}.issubset(file_names)
+    assert {
+        "SKILL.md",
+        "README.md",
+        "manifest.json",
+        "references/data-structure.md",
+        "references/resource-map.md",
+        "references/source-coverage.md",
+        "references/glossary.md",
+        "references/patterns.md",
+        "references/pitfalls.md",
+        "references/freshness.md",
+        "references/citation-policy.md",
+        "references/task-routes.md",
+        "references/task-playbooks/onboarding.md",
+        "references/task-playbooks/architecture-question.md",
+        "references/task-playbooks/debugging.md",
+        "references/task-playbooks/change-impact.md",
+        "examples/smoke-queries.md",
+        "scripts/verify-sourcebrief-runtime.sh",
+    }.issubset(file_names)
+    assert len(file_names) >= 17
+    files_by_path = {file["path"]: file for file in export_body["files"]}
     joined = "\n".join(file.get("content") or "" for file in export_body["files"])
     assert "sourcebrief.get_agent_context" in joined
+    assert "sourcebrief.read_section" in joined
+    assert "references/data-structure.md" in joined
+    assert "references/resource-map.md" in joined
+    assert "references/task-playbooks/onboarding.md" in joined
     assert "context_pack_key" in joined
     assert "context_pack_version" in joined
     assert "context_pack_snapshot_pin_enforced" in joined
+    assert "book-to-skill" in files_by_path["manifest.json"]["content"]
+    assert "rag-skill" in files_by_path["manifest.json"]["content"]
+    assert "garden-skills" in files_by_path["manifest.json"]["content"]
+    assert "Skill-Anything" in files_by_path["manifest.json"]["content"]
+    assert files_by_path["examples/smoke-queries.md"]["content"].count("## ") >= 3
     assert "Bearer " not in joined
     assert "cs_" not in joined
     assert "/home/" not in joined
+    assert "alice:secret" not in joined
+    assert "SECRET_QUERY_TOKEN" not in joined
+    assert "access_token" not in joined
+    assert "/Users/alice" not in joined
+    assert r"C:\Users\alice" not in joined
+    assert r"\\server\share" not in joined
+    assert "https://example.com/org/repo.git" in joined
+    assert "[local-path-redacted]" in joined
     assert "Runtime adapters must not copy this corpus sentence" not in joined
     assert export_body["validation_json"]["ok"] is True
+    assert export_body["validation_json"]["file_count"] >= 17
     assert export_body["leak_scan_json"]["ok"] is True
 
     repeated = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/context-packs/default/versions/{published_pack.json()['version']}/skill-exports",
         headers=auth_headers(token),
-        json={"export_type": "hermes_skill", "title": "Default runtime skill", "summary": "Use pinned SourceBrief runtime context."},
+        json=safe_export_payload,
     )
     assert repeated.status_code == 200, repeated.text
     assert repeated.json()["id"] == export_body["id"]
