@@ -24,14 +24,14 @@ export default function AgentProfilePage() {
   const [generating, setGenerating] = useState(false);
   const [runtimeTarget, setRuntimeTarget] = useState<'hermes' | 'claude' | 'codex'>('hermes');
   const [installPlan, setInstallPlan] = useState<RuntimeInstallPlan | null>(null);
-  const [installPlanGeneratedFor, setInstallPlanGeneratedFor] = useState<{ target: string; scope: string } | null>(null);
+  const [installPlanGeneratedFor, setInstallPlanGeneratedFor] = useState<{ target: string; scope: string; workspaceId: string; projectId: string } | null>(null);
   const [installPlanError, setInstallPlanError] = useState<string | null>(null);
   const [generatingInstallPlan, setGeneratingInstallPlan] = useState(false);
   const activePrompt = REVIEW_PROMPTS.find((prompt) => prompt.id === selectedPrompt) ?? REVIEW_PROMPTS[0];
   const usageByResource = useMemo(() => new Map(usageItems.map((item) => [item.resource_id, item])), [usageItems]);
   const reviewByResource = useMemo(() => new Map(reviewItems.map((item) => [item.resource.id, item])), [reviewItems]);
   const currentInstallPlanScope = describeScope(resources, scopeResourceIds);
-  const installPlanIsStale = Boolean(installPlan && installPlanGeneratedFor && (installPlanGeneratedFor.target !== runtimeTarget || installPlanGeneratedFor.scope !== currentInstallPlanScope));
+  const installPlanIsStale = Boolean(installPlan && installPlanGeneratedFor && (installPlanGeneratedFor.target !== runtimeTarget || installPlanGeneratedFor.scope !== currentInstallPlanScope || installPlanGeneratedFor.workspaceId !== settings.workspaceId || installPlanGeneratedFor.projectId !== settings.projectId));
 
   function resetInstallPlan() {
     setInstallPlan(null);
@@ -72,10 +72,14 @@ export default function AgentProfilePage() {
         body: JSON.stringify({ target: requestedTarget, resource_ids: scopeResourceIds.length ? scopeResourceIds : null }),
       });
       setInstallPlan(result);
-      setInstallPlanGeneratedFor({ target: requestedTarget, scope: requestedScope });
+      setInstallPlanGeneratedFor({ target: requestedTarget, scope: requestedScope, workspaceId: settings.workspaceId, projectId: settings.projectId });
     } catch (err) { setInstallPlan(null); setInstallPlanGeneratedFor(null); setInstallPlanError(String(err)); }
     finally { setGeneratingInstallPlan(false); }
   }
+
+  useEffect(() => {
+    resetInstallPlan();
+  }, [settings.workspaceId, settings.projectId]);
 
   useEffect(() => {
     if (agent && resources.length && preview === null && !generating) void generatePreview();

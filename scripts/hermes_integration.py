@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -150,6 +151,12 @@ def rpc(api_url: str, workspace_id: str, project_id: str, token: str, body: dict
 def create_token(args: argparse.Namespace) -> tuple[str, dict[str, Any] | None]:
     if args.token:
         return args.token, None
+    if args.token_env:
+        token = os.getenv(args.token_env)
+        if not token:
+            fail(f"environment variable {args.token_env} is not set")
+        assert token is not None
+        return token, None
     headers = bearer_headers(args.admin_token) if args.admin_token else {"X-User-Email": args.email, "Content-Type": "application/json"}
     allowed_resource_ids = args.resource_id
     if allowed_resource_ids is None and args.allow_empty:
@@ -268,7 +275,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--query", required=True)
     parser.add_argument("--resource-id", action="append")
     parser.add_argument("--admin-token", help="existing bearer token used only to create the read-only integration token")
-    parser.add_argument("--token", help="existing bearer token; skip token creation")
+    parser.add_argument("--token", help="existing bearer token; skip token creation; avoid this on shared systems because argv may expose secrets")
+    parser.add_argument("--token-env", help="environment variable containing an existing bearer token; preferred for validation commands")
     parser.add_argument("--token-name", default="Hermes SourceBrief token")
     parser.add_argument("--scope", action="append", help="read-only token scope; repeatable or comma-separated; defaults to project/resource/review read + project query")
     parser.add_argument("--server-name", default="sourcebrief")

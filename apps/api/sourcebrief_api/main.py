@@ -1115,9 +1115,13 @@ def _runtime_public_api_base(public_api_url: str | None) -> str:
     parsed = urlsplit(raw)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HTTPException(status_code=422, detail="public_api_url must be an http(s) URL")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="public_api_url has an invalid port") from exc
     netloc = parsed.hostname
-    if parsed.port:
-        netloc = f"{netloc}:{parsed.port}"
+    if port:
+        netloc = f"{netloc}:{port}"
     return urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")).rstrip("/")
 
 
@@ -1171,23 +1175,15 @@ def _runtime_validator_commands(
         str(project_id),
         "--query",
         "SourceBrief runtime install plan validation",
-        "--token",
-        "$SOURCEBRIEF_TOKEN",
+        "--token-env",
+        "SOURCEBRIEF_TOKEN",
         "--redact-token",
     ]
     if not resource_ids:
         base.append("--allow-empty")
     for resource_id in resource_ids:
         base.extend(["--resource-id", str(resource_id)])
-    hermes_command = " ".join(shlex.quote(part) if part != "$SOURCEBRIEF_TOKEN" else part for part in base)
-    if target == "hermes":
-        return [hermes_command]
-    mcp_url = f"{api_base_url}/mcp/{workspace_id}/{project_id}"
-    curl_payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, separators=(",", ":"))
-    return [
-        f"curl -sS -H 'Authorization: Bearer '$SOURCEBRIEF_TOKEN -H 'Content-Type: application/json' -d {shlex.quote(curl_payload)} {shlex.quote(mcp_url)}",
-        hermes_command,
-    ]
+    return [" ".join(shlex.quote(part) for part in base)]
 
 
 def _runtime_capabilities(profile: AgentProfile | None, include_optional_tools: bool) -> list[RuntimeInstallPlanCapability]:
@@ -1251,6 +1247,7 @@ def _runtime_plan_response(
     principal: Principal,
 ) -> RuntimeInstallPlanResponse:
     require_scope(principal, "project:read")
+    require_scope(principal, "resource:read")
     project = _require_project_access(session, workspace_id, project_id, principal)
     profile = _ensure_agent_profile(session, workspace_id, project, principal.user.id)
     api_base_url = _runtime_public_api_base(payload.public_api_url)

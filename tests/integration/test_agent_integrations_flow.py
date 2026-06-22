@@ -34,7 +34,9 @@ def require_real_services() -> None:
 def make_project(client: TestClient, prefix: str) -> tuple[dict[str, str], str, str]:
     stamp = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
     headers = {"X-User-Email": f"{prefix}-{stamp}@example.com"}
-    ws = client.post("/workspaces", json={"name": prefix, "slug": f"{prefix}-{stamp}"}, headers=headers)
+    ws = client.post(
+        "/workspaces", json={"name": prefix, "slug": f"{prefix}-{stamp}"}, headers=headers
+    )
     assert ws.status_code == 201, ws.text
     workspace_id = ws.json()["id"]
     project = client.post(
@@ -99,7 +101,12 @@ def test_agent_context_api_and_mcp_tool_call() -> None:
 
     response = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
-        json={"query": "runtime_symbol", "runtime": "hermes", "resource_ids": [resource_id], "top_k": 5},
+        json={
+            "query": "runtime_symbol",
+            "runtime": "hermes",
+            "resource_ids": [resource_id],
+            "top_k": 5,
+        },
         headers=headers,
     )
     assert response.status_code == 200, response.text
@@ -111,7 +118,9 @@ def test_agent_context_api_and_mcp_tool_call() -> None:
     assert "graph_score" in body["citations"][0]
     assert any(symbol["name"] == "runtime_symbol" for symbol in body["symbols"])
 
-    profile = client.get(f"/workspaces/{workspace_id}/projects/{project_id}/agent-profile", headers=headers)
+    profile = client.get(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-profile", headers=headers
+    )
     assert profile.status_code == 200, profile.text
     profile_body = profile.json()
     assert profile_body["project_id"] == project_id
@@ -121,7 +130,10 @@ def test_agent_context_api_and_mcp_tool_call() -> None:
 
     updated = client.patch(
         f"/workspaces/{workspace_id}/projects/{project_id}/agent-profile",
-        json={"system_prompt": "Prefer concise repo-owner-safe answers.", "default_runtime": "codex"},
+        json={
+            "system_prompt": "Prefer concise repo-owner-safe answers.",
+            "default_runtime": "codex",
+        },
         headers=headers,
     )
     assert updated.status_code == 200, updated.text
@@ -167,7 +179,11 @@ def test_agent_context_api_and_mcp_tool_call() -> None:
             "method": "tools/call",
             "params": {
                 "name": "sourcebrief.get_agent_context",
-                "arguments": {"query": "falconagent", "runtime": "codex", "resource_ids": [resource_id]},
+                "arguments": {
+                    "query": "falconagent",
+                    "runtime": "codex",
+                    "resource_ids": [resource_id],
+                },
             },
         },
         headers=headers,
@@ -218,12 +234,20 @@ def test_runtime_install_plan_is_redacted_live_and_permission_scoped() -> None:
     assert body["endpoints"]["api_base_url"] == "https://sourcebrief.example.com/api"
     assert "SECRET" not in str(body)
     assert "alice" not in str(body)
-    assert body["required_scopes"] == ["project:read", "project:query", "resource:read", "review:read", "code:read"]
+    assert body["required_scopes"] == [
+        "project:read",
+        "project:query",
+        "resource:read",
+        "review:read",
+        "code:read",
+    ]
     assert body["suggested_token_request"]["allowed_resource_ids"] == [resource_id]
     assert "${" in body["mcp_config"]["content"]
     assert not re.search(r"cs_[A-Za-z0-9_-]{20,}", body["mcp_config"]["content"])
     assert body["resource_scope"]["resources"][0]["name"] == "Runtime Primary"
     assert "--query" in body["validator_commands"][0]
+    assert "--token-env SOURCEBRIEF_TOKEN" in body["validator_commands"][0]
+    assert "--token $SOURCEBRIEF_TOKEN" not in body["validator_commands"][0]
     assert "--allow-empty" not in body["validator_commands"][0]
 
     empty_plan = client.post(
@@ -236,10 +260,22 @@ def test_runtime_install_plan_is_redacted_live_and_permission_scoped() -> None:
     assert empty_body["resource_scope"] == {"mode": "selected_resources", "resources": []}
     assert empty_body["suggested_token_request"]["allowed_resource_ids"] == []
     assert "--allow-empty" in empty_body["validator_commands"][0]
+    assert "--token-env SOURCEBRIEF_TOKEN" in empty_body["validator_commands"][0]
+
+    invalid_port = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/runtime-install-plan",
+        json={"target": "hermes", "public_api_url": "https://sourcebrief.example.com:99999"},
+        headers=headers,
+    )
+    assert invalid_port.status_code == 422
 
     claude_plan = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/runtime-install-plan",
-        json={"target": "claude", "server_name": "sourcebrief.prod", "public_api_url": "https://sourcebrief.example.com"},
+        json={
+            "target": "claude",
+            "server_name": "sourcebrief.prod",
+            "public_api_url": "https://sourcebrief.example.com",
+        },
         headers=headers,
     )
     assert claude_plan.status_code == 200, claude_plan.text
@@ -252,7 +288,11 @@ def test_runtime_install_plan_is_redacted_live_and_permission_scoped() -> None:
 
     codex_plan = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/runtime-install-plan",
-        json={"target": "codex", "server_name": "sourcebrief.prod", "public_api_url": "https://sourcebrief.example.com"},
+        json={
+            "target": "codex",
+            "server_name": "sourcebrief.prod",
+            "public_api_url": "https://sourcebrief.example.com",
+        },
         headers=headers,
     )
     assert codex_plan.status_code == 200, codex_plan.text
@@ -273,9 +313,31 @@ def test_runtime_install_plan_is_redacted_live_and_permission_scoped() -> None:
     tool_names = {tool["name"] for tool in tools.json()["result"]["tools"]}
     plan_tool_names = {capability["name"] for capability in body["capabilities"]}
     assert plan_tool_names == tool_names
-    patch_capability = next(capability for capability in body["capabilities"] if capability["name"] == "sourcebrief.generate_patch")
+    patch_capability = next(
+        capability
+        for capability in body["capabilities"]
+        if capability["name"] == "sourcebrief.generate_patch"
+    )
     assert patch_capability["enabled"] is False
     assert patch_capability["policy"] == "opt_in_disabled_by_default"
+
+    project_read_only = client.post(
+        f"/workspaces/{workspace_id}/api-tokens",
+        json={
+            "name": "runtime project reader",
+            "scopes": ["project:read"],
+            "allowed_project_ids": [project_id],
+        },
+        headers=headers,
+    )
+    assert project_read_only.status_code == 201, project_read_only.text
+    project_read_only_plan = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/runtime-install-plan",
+        json={"target": "hermes"},
+        headers={"Authorization": f"Bearer {project_read_only.json()['token']}"},
+    )
+    assert project_read_only_plan.status_code == 403
+    assert "resource:read" in project_read_only_plan.text
 
     token_response = client.post(
         f"/workspaces/{workspace_id}/api-tokens",
@@ -299,7 +361,9 @@ def test_runtime_install_plan_is_redacted_live_and_permission_scoped() -> None:
     assert scoped_plan.status_code == 200, scoped_plan.text
     scoped_body = scoped_plan.json()
     assert scoped_body["resource_scope"]["mode"] == "token_allowed_resources"
-    assert [resource["resource_id"] for resource in scoped_body["resource_scope"]["resources"]] == [resource_id]
+    assert [resource["resource_id"] for resource in scoped_body["resource_scope"]["resources"]] == [
+        resource_id
+    ]
     assert runtime_token not in str(scoped_body)
 
     denied = client.post(
@@ -329,7 +393,11 @@ def test_agent_registry_respects_private_project_membership() -> None:
     intruder_email = "m7-private-intruder@example.com"
     session = get_sessionmaker()()
     intruder_user = get_or_create_user(session, intruder_email)
-    session.add(WorkspaceMembership(workspace_id=UUID(workspace_id), user_id=intruder_user.id, role="viewer"))
+    session.add(
+        WorkspaceMembership(
+            workspace_id=UUID(workspace_id), user_id=intruder_user.id, role="viewer"
+        )
+    )
     session.commit()
     session.close()
 
@@ -487,7 +555,10 @@ def test_mcp_json_rpc_error_semantics() -> None:
             "jsonrpc": "2.0",
             "id": 12,
             "method": "tools/call",
-            "params": {"name": "sourcebrief.get_agent_context", "arguments": {"query": "x", "runtime": "root"}},
+            "params": {
+                "name": "sourcebrief.get_agent_context",
+                "arguments": {"query": "x", "runtime": "root"},
+            },
         },
         headers=headers,
     )

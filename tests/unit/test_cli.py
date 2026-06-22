@@ -502,3 +502,30 @@ def test_hermes_integration_allow_empty_creates_empty_resource_allowlist(monkeyp
     module.create_token(args)
 
     assert calls[0]["json"]["allowed_resource_ids"] == []
+
+
+def test_hermes_integration_token_env_avoids_token_argv(monkeypatch):
+    module = importlib.import_module("scripts.hermes_integration")
+
+    def fail_request_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("token-env should skip token creation")
+
+    monkeypatch.setattr(module, "request_json", fail_request_json)
+    monkeypatch.setenv("SOURCEBRIEF_TOKEN", "cs_env_secret")
+    args = module.build_parser().parse_args(
+        [
+            "--workspace-id",
+            "ws-1",
+            "--project-id",
+            "proj-1",
+            "--query",
+            "demo",
+            "--token-env",
+            "SOURCEBRIEF_TOKEN",
+        ]
+    )
+
+    token, api_token = module.create_token(args)
+
+    assert token == "cs_env_secret"
+    assert api_token is None
