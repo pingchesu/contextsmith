@@ -12,7 +12,19 @@ It is intentionally deterministic. Use it when you want to show the product idea
 
 - The local stack is already running. See [Quick start](QUICKSTART.md).
 - The CLI is on your path.
-- Local dev auth is enabled only for this local demo:
+- Local dev header auth is enabled for this demo.
+
+The default quickstart keeps `SOURCEBRIEF_DEV_AUTH=false`. For this local-only CLI demo, set `SOURCEBRIEF_DEV_AUTH=true` in `.env` before startup, or restart the stack after changing it:
+
+```bash
+# in .env
+SOURCEBRIEF_DEV_AUTH=true
+
+make compose-down
+make compose-up
+```
+
+Then configure the CLI demo environment:
 
 ```bash
 export SOURCEBRIEF_API_URL=http://localhost:18000

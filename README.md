@@ -200,7 +200,7 @@ make verify     # full local acceptance gate
 
 ## Security and privacy
 
-SourceBrief analyzes only the sources you connect or upload. Use ignore rules and bounded import settings to exclude secrets, vendored code, generated files, or private material you do not want indexed.
+SourceBrief analyzes only the sources you connect or upload. Use built-in skip rules, bounded import settings, and redaction checks to reduce accidental indexing of secrets, vendored code, generated files, or private material.
 
 Generated Skill Packs and runtime adapters should point agents back to SourceBrief citations. They should not embed an entire private source corpus.
 
