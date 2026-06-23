@@ -130,7 +130,7 @@ Initial commands:
 ```bash
 sourcebrief runtime detect
 sourcebrief runtime apply --plan plan.json --target hermes --dry-run
-sourcebrief runtime apply --plan plan.json --target hermes --yes
+sourcebrief runtime apply --plan plan.json --target hermes --apply
 sourcebrief runtime rollback --receipt receipt.json
 sourcebrief runtime validate --plan plan.json
 ```
@@ -149,7 +149,7 @@ sourcebrief runtime uninstall --receipt ...
 - `apply` validates the plan schema/version, target, plan digest, and expected SourceBrief project before computing any file write.
 - `apply` rejects malformed, unsupported, stale, hand-edited, or target-mismatched plans before touching runtime config.
 - `apply --dry-run` prints exact planned file operations and writes nothing.
-- `apply --yes` is required for any write; no default mutation.
+- `apply --apply` is required for any write; no default mutation.
 - Apply writes only a SourceBrief-managed MCP server entry or managed block.
 - Apply uses atomic temp-file writes and creates backups or preimage hashes before mutation.
 - Apply writes a receipt containing:
@@ -334,11 +334,18 @@ Prepare SourceBrief for easy installers and packages without overclaiming securi
 - Security scripts must fail on missing coverage, zero files checked, or stale checksum manifests.
 - Local cache/context artifacts must be documented as sensitive.
 
-### Acceptance criteria
+### Status
 
-- Install docs distinguish stack install from runtime integration install.
-- Docs state what is local, what contacts network endpoints, and how to disable optional update/download behavior.
-- No SLSA/reproducible/static/VirusTotal claims are present unless backed by CI and installer enforcement.
+Implemented in Workstream F:
+
+- Runtime apply now exposes explicit `--apply` for local mutation while keeping `--dry-run` as the safe preview path and `--yes` only as a compatibility alias.
+- Docs distinguish stack install from runtime integration install, document local/network boundaries, and state that local config, receipts, generated plans, agent packs, and cached context are sensitive workspace artifacts.
+- Runtime install docs explicitly avoid `curl | sh`, mutable `latest`, package-manager auto-mutation, and release signature claims; SourceBrief does not claim SLSA, reproducible builds, static analysis attestation, or VirusTotal coverage.
+
+### Verification
+
+- Unit tests cover dry-run/no-write, explicit apply, rollback, stale/tampered plan rejection, future timestamp rejection, forged backup rejection, validator token redaction, and `--dry-run`/`--apply` conflict.
+- Documentation search found no unsupported SLSA/reproducible/VirusTotal claims in current user-facing install/runtime docs.
 
 ## Execution order
 
@@ -376,5 +383,7 @@ Each PR should update this spec's status notes or the relevant user-facing docs 
 - Claude Code reviewers were attempted but blocked by `401 Invalid authentication credentials`; five Hermes fallback reviewers supplied the corresponding lenses.
 - Workstream A completed in PR #58.
 - Workstream B completed in PR #59.
-- Workstream C in progress on `feat/architecture-overview`: adds `sourcebrief.get_architecture` / compact graph overview with scoped resource filtering.
-- No remaining implementation workstream is complete until its acceptance criteria and verification gates pass.
+- Workstream C completed in PR #60.
+- Workstream D completed in PR #61.
+- Workstream E completed in PR #62.
+- Workstream F is implemented in this PR and closes the codebase-memory MCP reference sequence once merged.

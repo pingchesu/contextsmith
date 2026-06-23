@@ -728,6 +728,58 @@ def test_runtime_apply_rejects_stale_plan_before_write(tmp_path, capsys):
     assert not config.exists()
 
 
+
+def test_runtime_apply_rejects_dry_run_and_apply_together(tmp_path, capsys):
+    plan = _runtime_plan(tmp_path)
+    config = tmp_path / "config.yaml"
+
+    assert (
+        cli_main(
+            [
+                "runtime",
+                "apply",
+                "--plan",
+                str(plan),
+                "--target",
+                "hermes",
+                "--config",
+                str(config),
+                "--dry-run",
+                "--apply",
+            ]
+        )
+        == 1
+    )
+
+    assert "only one of --dry-run or --apply" in capsys.readouterr().err
+    assert not config.exists()
+
+
+def test_runtime_apply_rejects_dry_run_and_yes_alias_together(tmp_path, capsys):
+    plan = _runtime_plan(tmp_path)
+    config = tmp_path / "config.yaml"
+
+    assert (
+        cli_main(
+            [
+                "runtime",
+                "apply",
+                "--plan",
+                str(plan),
+                "--target",
+                "hermes",
+                "--config",
+                str(config),
+                "--dry-run",
+                "--yes",
+            ]
+        )
+        == 1
+    )
+
+    assert "only one of --dry-run or --apply" in capsys.readouterr().err
+    assert not config.exists()
+
 def test_runtime_apply_and_rollback_existing_config(tmp_path, capsys):
     plan = _runtime_plan(tmp_path)
     config = tmp_path / "config.yaml"
@@ -749,7 +801,7 @@ def test_runtime_apply_and_rollback_existing_config(tmp_path, capsys):
                 str(config),
                 "--receipt",
                 str(receipt),
-                "--yes",
+                "--apply",
             ]
         )
         == 0

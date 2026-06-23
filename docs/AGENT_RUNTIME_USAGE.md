@@ -201,7 +201,7 @@ sourcebrief --json token create \
   --resource-id "$RESOURCE_ID"
 ```
 
-The plaintext token is returned once. Store it in the runtime's secret manager or environment, not in Git:
+The plaintext token is returned once. Store it in the runtime's secret manager or environment, not in Git. Treat local runtime config, generated plans, receipts, downloaded/generated agent packs, and cached context as sensitive workspace artifacts because they can expose endpoint URLs, project/resource IDs, source paths, and citations even when token values are not present:
 
 ```bash
 export SB_TOKEN="<sourcebrief-api-token>"

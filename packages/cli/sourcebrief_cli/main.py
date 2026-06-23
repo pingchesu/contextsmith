@@ -379,9 +379,11 @@ def cmd_runtime_apply(_client: SourceBriefClient, args: argparse.Namespace) -> A
     validation = _read_validated_runtime_plan(args)
     config_path = runtime_apply.hermes_config_path(args.config)
     if args.dry_run:
+        if args.apply or args.yes:
+            raise SourceBriefCliError("runtime apply accepts only one of --dry-run or --apply/--yes")
         return runtime_apply.dry_run_apply(validation, config_path)
-    if not args.yes:
-        raise SourceBriefCliError("runtime apply requires --dry-run or --yes")
+    if not (args.apply or args.yes):
+        raise SourceBriefCliError("runtime apply requires --dry-run or explicit --apply")
     return runtime_apply.apply_plan(validation, config_path, runtime_apply.receipt_path(args.receipt))
 
 
@@ -613,7 +615,8 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_apply_parser.add_argument("--config", help="Hermes config path; defaults to ~/.hermes/config.yaml")
     runtime_apply_parser.add_argument("--receipt", help="receipt output path")
     runtime_apply_parser.add_argument("--dry-run", action="store_true", help="show planned writes without changing files")
-    runtime_apply_parser.add_argument("--yes", action="store_true", help="perform the local config write")
+    runtime_apply_parser.add_argument("--apply", action="store_true", help="perform the local config write after plan validation")
+    runtime_apply_parser.add_argument("--yes", action="store_true", help="deprecated alias for --apply")
     runtime_apply_parser.add_argument("--max-age-seconds", type=int, default=86400, help="reject plans older than this; use -1 to disable")
     runtime_apply_parser.set_defaults(func=cmd_runtime_apply)
 
