@@ -277,8 +277,8 @@ Use a scoped bearer token in the `Authorization` header. In the examples below, 
 | Runtime | Config shape | Reload / validation | Common failure mode |
 | --- | --- | --- | --- |
 | Hermes | YAML `mcp_servers.sourcebrief.url` plus `headers.Authorization`. | Restart Hermes/gateway or use runtime MCP reload; then run `sourcebrief doctor --query ...` or `scripts/hermes_integration.py`. | Gateway has discovered tools but invocation returns stale session/tool errors; restart the runtime side. |
-| Claude Code | JSON `mcpServers.sourcebrief` or project instruction file from the agent pack. | Restart Claude Code session after changing MCP config/instructions. | Instruction file is loaded but MCP server is not configured, so Claude can mention SourceBrief but cannot call it. |
-| Codex | JSON `mcp_servers.sourcebrief` plus optional `AGENTS.md` from the agent pack. | Start a fresh Codex session in the target checkout after config changes. | Codex treats indexed remote code as local files; remind it to use SourceBrief for evidence and local tools only for the real checkout. |
+| Claude Code | JSON `mcpServers.sourcebrief` with `type = http`, or project instruction file from the agent pack. | Restart Claude Code session after changing MCP config/instructions. | Instruction file is loaded but MCP server is not configured, so Claude can mention SourceBrief but cannot call it. |
+| Codex | TOML `[mcp_servers.sourcebrief]` with `url` and `bearer_token_env_var`, plus optional `AGENTS.md` from the agent pack. | Start a fresh Codex session in the target checkout after config changes. | Codex treats indexed remote code as local files; remind it to use SourceBrief for evidence and local tools only for the real checkout. |
 | Cursor/custom MCP | HTTP MCP URL + bearer header if the client supports custom headers. | Use the client MCP inspector/logs plus `sourcebrief doctor --query ...`. | Client supports stdio MCP only or cannot set headers; use an adapter/proxy or another runtime. |
 
 Runtime setup should be boring and reversible: generate a plan, inspect config and scopes, validate, apply only when intended, and keep rollback instructions.
@@ -332,7 +332,7 @@ sourcebrief.find_symbol
 
 ### Claude / Codex / Cursor config shape
 
-Different runtimes store MCP config in different files, but the SourceBrief server shape is the same. The generated agent pack's `mcp.json` currently includes ready-to-copy sections for Hermes, Claude, and Codex. For Cursor or another MCP-capable client, use the same URL and header shape if that client supports HTTP MCP servers with custom headers.
+Different runtimes store MCP config in different formats. The shapes below mirror SourceBrief's runtime install-plan generator. For Cursor or another MCP-capable client, use the same HTTP MCP URL and bearer auth pattern if that client supports HTTP MCP servers with custom headers.
 
 Claude-style JSON:
 
@@ -340,6 +340,7 @@ Claude-style JSON:
 {
   "mcpServers": {
     "sourcebrief": {
+      "type": "http",
       "url": "http://localhost:18000/mcp/<workspace-id>/<project-id>",
       "headers": {
         "Authorization": "<bearer-header-value>"
@@ -349,22 +350,15 @@ Claude-style JSON:
 }
 ```
 
-Codex-style JSON:
+Codex-style TOML:
 
-```json
-{
-  "mcp_servers": {
-    "sourcebrief": {
-      "url": "http://localhost:18000/mcp/<workspace-id>/<project-id>",
-      "headers": {
-        "Authorization": "<bearer-header-value>"
-      }
-    }
-  }
-}
+```toml
+[mcp_servers.sourcebrief]
+url = "http://localhost:18000/mcp/<workspace-id>/<project-id>"
+bearer_token_env_var = "SOURCEBRIEF_TOKEN"
 ```
 
-Use the runtime's own secret mechanism if it does not expand environment variables in headers. Do not paste plaintext tokens into committed config.
+Use the runtime's own secret mechanism if it does not expand environment variables in headers. For the Codex shape above, put only the environment variable name in the config and export the token separately. Do not paste plaintext tokens into committed config.
 
 ## Install and use skills
 
