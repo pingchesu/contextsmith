@@ -1,8 +1,27 @@
 # Deep docs proof and IA cleanup
 
+## Implementation status
+
+Implemented in this PR:
+
+- Rewrote `CONCEPTS.md` around the product mental model: `Source -> Snapshot -> Evidence -> Review -> Runtime`.
+- Added `docs/PROOF_ARTIFACTS.md` as the single proof manifest for screenshots, captured outputs, real-service tests, and proof gaps.
+- Reorganized `docs/README.md` into primary path, proof/demos, runtime/operations, reference, deep specs, follow-up trackers, and archive.
+- Updated `AGENT_RUNTIME_USAGE.md` for the current MCP golden path: `sourcebrief.ask`, `sourcebrief.discover`, and `sourcebrief.lookup`, plus per-runtime setup/reload/failure-mode guidance.
+- Updated README, Quick start, Demo, and Status links so proof artifacts are visible without turning the front door into a text wall.
+
+## Remaining follow-ups
+
+These are intentionally not faked here:
+
+- Capture a real Resource Map rendered/API output artifact.
+- Capture a real Context Pack `get_context_pack` + pack-scoped `ask` output artifact.
+- Capture a real approved Skill Export manifest/validation report artifact.
+- Capture a clean terminal transcript for `sourcebrief doctor --query` and `runtime setup hermes --dry-run`.
+
 ## Problem
 
-The front door now explains SourceBrief better, but deep docs still mix product concepts, runtime guidance, specs, milestones, and internal history. The next docs pass should make runtime usage and proof artifacts complete without turning the README back into a wall of text.
+The front door now explains SourceBrief better, but deep docs still mixed product concepts, runtime guidance, specs, milestones, and internal history. The docs needed a second pass that made runtime usage and proof artifacts complete without turning the README back into a wall of text.
 
 ## Scope
 

@@ -1,73 +1,89 @@
 # Concepts
 
-SourceBrief has a few terms that sound similar. This page defines them in user-facing language.
-
-## The short version
+SourceBrief is easier to understand as a pipeline than as a feature list:
 
 ```text
-Source -> Snapshot -> Resource Map -> Context Pack -> Runtime context / Skill Pack
+Source -> Snapshot -> Evidence -> Review -> Runtime
 ```
 
-A source is something you connect. A snapshot is the exact version SourceBrief indexed. A Resource Map explains what SourceBrief found. A Context Pack is a reviewed, pinned bundle of evidence. Runtime context and Skill Packs are how agents use that evidence.
+<img src="assets/sourcebrief-context-flow.svg" alt="SourceBrief context flow from sources through snapshots and reviewed evidence to runtime agents" width="100%" />
 
-## Terms
+The core idea: agents should ask for cited project evidence before they edit. SourceBrief stores exact indexed versions of project material, attaches provenance to retrieved context, and serves that evidence through UI, CLI, HTTP, and MCP.
 
-| Term | Plain meaning | When you care |
+## The product mental model
+
+| Stage | Plain meaning | Why it exists |
 | --- | --- | --- |
-| Workspace | A tenant boundary for users, projects, tokens, and audit events. | When administering teams or access. |
-| Project | A scoped context space, usually for a product, service, or repo group. | When choosing what an agent can query. |
-| Source / Resource | A connected repo, doc, URL, runbook, upload, or zip folder bundle. | When adding knowledge to SourceBrief. |
-| Snapshot | The exact indexed version of a source. For Git this includes commit information. | When auditing where an answer came from. |
-| Chunk | A searchable piece of indexed text with citation metadata. | Mostly for retrieval/debugging. |
-| Code symbol | A deterministic symbol extracted from source files when applicable. | When agents need code-aware context. |
-| Resource graph | Relationships between resources, directories, files, and code symbols. | When following source structure, dependencies, or change impact. |
-| Resource Map | A reviewable, citation-backed map of a repo or folder. | When onboarding an agent or understanding a codebase. |
-| Context Packet | A cited retrieval result for a question. | When an API client needs ranked snippets and citations. |
-| Agent Context | A runtime-shaped response for Hermes, Claude, Codex, Cursor, or API clients. | When serving context to an agent session. |
-| Context Pack | A versioned, published evidence bundle built from approved artifacts. | When you want stable context for repeatable agent work. |
-| Skill Export / Skill Pack | An installable/runtime package generated from a published Context Pack. | When you want reusable, citation-backed agent instructions and references. |
-| Repo Agent | A managed profile/view over Git resources, Context Packs, and exports. | When treating a repo as an agent-ready source, not as an autonomous actor. |
-| MCP tools | JSON-RPC tools that let agent runtimes query SourceBrief. | When integrating Claude, Codex, Cursor, Hermes, or custom agents. |
+| Source | A repo, doc, URL, runbook, upload, or folder bundle you connect. | Gives SourceBrief material to index. |
+| Snapshot | The exact version SourceBrief indexed. Git snapshots include commit provenance; docs/uploads include content hashes. | Lets answers point to the version they came from. |
+| Evidence | Search chunks, retained sections, citations, code symbols, graph nodes/edges, and file paths. | Gives agents inspectable handles, not just prose. |
+| Review | Resource Maps, freshness, coverage, Context Packs, and Skill Exports. | Lets humans decide which context is useful, stale, or reusable. |
+| Runtime | Workbench, CLI, HTTP API, and MCP tools such as `sourcebrief.ask`, `sourcebrief.search`, and `sourcebrief.read_section`. | Lets agents use the reviewed evidence during real work. |
 
-## What SourceBrief returns
+If you remember one sentence, use this:
 
-SourceBrief does not try to be the final author of truth. It returns evidence that an agent or human can inspect:
+> SourceBrief is the read-only evidence service behind coding agents.
 
-- source name
-- path or title
-- line range or ordinal
-- snapshot id
-- commit SHA when available
-- content hash
-- retrieval score and graph/code-symbol hints
-- runtime instructions for the caller
+## The common objects
+
+| Object | What it is | Use it when... |
+| --- | --- | --- |
+| Workspace | Tenant boundary for users, projects, tokens, and audit events. | You are administering access. |
+| Project | Context boundary for a product, service, or repo group. | You choose what an agent is allowed to ask about. |
+| Source / Resource | User-facing source material; backend APIs often call it a resource. | You connect or scope knowledge. |
+| Snapshot | Indexed version of a resource. | You need provenance, freshness, or reproducibility. |
+| Citation | A pointer back to path/title, ordinal or lines, snapshot, hash, and score. | You need to verify a claim. |
+| Agent Context | Runtime-shaped answer with instruction, context, citations, symbols, and follow-up tool hints. | An agent needs a cited project answer. |
+| Resource Map | Reviewable map of what SourceBrief found in one source. | You are onboarding or auditing a source. |
+| Context Pack | Versioned, published bundle of approved artifacts. | A team wants stable evidence for repeatable work. |
+| Skill Export / Agent Pack | Runtime adapter files that tell an agent how to call SourceBrief and respect citations. | You want repeatable agent behavior, not one-off prompts. |
+| MCP tools | JSON-RPC tool surface for live agent sessions. | Hermes, Claude Code, Codex, Cursor, or another MCP client needs on-demand evidence. |
 
 ## Resource Map vs Context Pack
 
-A Resource Map answers:
+A **Resource Map** answers:
 
-> What did SourceBrief find in this source, and where should an agent start?
+> What did SourceBrief find inside this one source, and where should an agent start?
 
-A Context Pack answers:
+A **Context Pack** answers:
 
-> Which approved evidence bundle should an agent use for this task or project?
+> Which approved evidence bundle should an agent use for this workflow or project?
 
-Resource Maps are source-specific. Context Packs can combine approved artifacts and coverage across sources.
+Resource Maps are source-specific. Context Packs can combine approved artifacts from multiple sources and pin the snapshot versions used by a workflow.
 
-## Skill Pack vs repo agent
+## Agent Context vs Context Packet
 
-A Skill Pack is an exported package: instructions, references, citations, smoke queries, and verification metadata.
+Both are cited retrieval results, but they serve different callers.
 
-A repo agent is a product view over a repository source: resource state, Context Packs, exports, review findings, and runtime usage.
+| Shape | Caller | Difference |
+| --- | --- | --- |
+| Context Packet | API clients that want raw ranked evidence. | Retrieval-oriented response. |
+| Agent Context | Agent runtimes such as Hermes, Claude, Codex, Cursor, or MCP clients. | Adds runtime instruction, token budget hint, symbols, pack pinning metadata, and suggested next tool calls. |
 
-Importing a repo does not magically create an autonomous engineer. It gives agents a better evidence layer.
+Start with `sourcebrief.ask` / `sourcebrief.get_agent_context`. Drill down with `sourcebrief.search`, `sourcebrief.read_section`, `sourcebrief.search_code`, `sourcebrief.grep_code`, `sourcebrief.read_file`, and graph tools when a task needs exact evidence.
 
-## MCP is a runtime channel
+## What SourceBrief returns
 
-MCP is how agents ask SourceBrief for context. It is not the core product value by itself.
+A useful answer should expose:
 
-The value is that SourceBrief can answer from reviewed, versioned, permission-scoped evidence. MCP makes that evidence available to agent clients.
+- source name;
+- path or title;
+- line range, section ordinal, or citation locator;
+- snapshot/version identifier;
+- commit or content hash where available;
+- retrieval score and graph/code-symbol hints;
+- runtime instruction and follow-up tool calls.
 
-## Production actions are out of scope
+That is what makes the answer inspectable.
 
-SourceBrief provides context. It does not execute production mutations. If an agent needs to deploy, restart services, write to GitHub, or touch production systems, keep those actions behind separate typed tools, approval boundaries, and rollback workflows.
+## What SourceBrief is not
+
+SourceBrief is not:
+
+- a replacement for the local checkout;
+- a production executor;
+- a magic repo-to-autonomous-engineer converter;
+- a place to paste secrets into generated configs;
+- proof that an agent has permission to deploy, restart, commit, or open PRs.
+
+Use SourceBrief to know where to look and what to trust. Use the coding agent's normal tools to edit, test, commit, and request approval.

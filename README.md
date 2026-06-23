@@ -8,7 +8,7 @@ SourceBrief turns repos, docs, runbooks, URLs, uploads, and folder bundles into 
 
 Use it when you need agents to answer with evidence, not vibes.
 
-[See the walkthrough](docs/WALKTHROUGH.md) · [Run it locally](docs/QUICKSTART.md) · [Try the 5-minute demo](docs/DEMO.md) · [View demo output](docs/examples/demo-runtime-output.md) · [Use it with agents](docs/AGENT_RUNTIME_USAGE.md) · [Read the docs](docs/README.md)
+[See the walkthrough](docs/WALKTHROUGH.md) · [Run it locally](docs/QUICKSTART.md) · [Try the 5-minute demo](docs/DEMO.md) · [View proof artifacts](docs/PROOF_ARTIFACTS.md) · [Use it with agents](docs/AGENT_RUNTIME_USAGE.md) · [Read the docs](docs/README.md)
 
 <img src="docs/assets/sourcebrief-mental-model.svg" alt="SourceBrief mental model from sources to snapshots to reviewed evidence to MCP/API agent access" width="100%" />
 
@@ -89,7 +89,7 @@ coding agent gets an issue
     -> explains the change with citations instead of vibes
 ```
 
-Start broad with `sourcebrief.get_agent_context`. Drill down with `search`, `read_section`, `search_code`, `grep_code`, `read_file`, `find_symbol`, and graph tools when the task needs exact evidence. Use SourceBrief to know where to look and what to trust; use the coding agent's normal tools to edit, test, commit, and open PRs.
+Start broad with `sourcebrief.ask` or `sourcebrief.discover`. Use `sourcebrief.lookup` for docs/code/symbol discovery. Drill down with `sourcebrief.search`, `sourcebrief.read_section`, `sourcebrief.search_code`, `sourcebrief.grep_code`, `sourcebrief.read_file`, `sourcebrief.find_symbol`, and graph tools when the task needs exact evidence. Use SourceBrief to know where to look and what to trust; use the coding agent's normal tools to edit, test, commit, and open PRs.
 
 For runtime setup, prompts, token scopes, remote-code safety, generated skills, and exact MCP tool guidance, read [Agent runtime usage](docs/AGENT_RUNTIME_USAGE.md).
 
