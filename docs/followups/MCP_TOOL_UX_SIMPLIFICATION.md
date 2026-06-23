@@ -1,5 +1,14 @@
 # MCP tool UX simplification
 
+## Implementation status
+
+Implemented in this PR:
+
+- Golden-path MCP aliases: `sourcebrief.ask`, `sourcebrief.discover`, and `sourcebrief.lookup`.
+- `sourcebrief.get_agent_context` / `sourcebrief.ask` now return `suggested_tool_calls` so agents know the next exact evidence tools to use.
+- MCP `tools/list` now orders golden-path tools first while keeping all existing tool names available.
+- `resource_ref` works for search/read-section and remote code drilldown paths where it can resolve to exactly one authorized resource.
+
 ## Problem
 
 The MCP model is sound, but agents see many low-level tools and often need UUID-first multi-step workflows. The first-call path should be obvious, and follow-up calls should be guided by returned evidence handles.

@@ -1523,6 +1523,9 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
     tools = mcp("tools/list")["result"]["tools"]
     tool_names = {tool["name"] for tool in tools}
     assert {
+        "sourcebrief.ask",
+        "sourcebrief.discover",
+        "sourcebrief.lookup",
         "sourcebrief.get_context_pack",
         "sourcebrief.list_sources",
         "sourcebrief.get_resource_map",
@@ -1533,10 +1536,19 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
         "sourcebrief.graph_query",
         "sourcebrief.graph_path",
     }.issubset(tool_names)
+    assert [tool["name"] for tool in tools[:3]] == ["sourcebrief.ask", "sourcebrief.discover", "sourcebrief.lookup"]
 
     sources = call("sourcebrief.list_sources", {"query": "F MCP", "limit": 10})
     assert sources["sources"]
     assert sources["sources"][0]["resource_id"] == resource_id
+
+    discovered = call("sourcebrief.discover", {"query": "F MCP", "limit": 10, "max_resources": 10, "max_items": 10})
+    assert discovered["sources"]["sources"][0]["name"] == "F MCP Runtime bundle"
+    assert discovered["architecture"]["resources"][0]["resource_id"] == resource_id
+
+    asked = call("sourcebrief.ask", {"query": "pinned runtime evidence", "resource_ids": [resource_id], "top_k": 3})
+    assert asked["citations"]
+    assert any(step["name"] == "sourcebrief.read_file" for step in asked["suggested_tool_calls"])
 
     pack = call("sourcebrief.get_context_pack", {"pack_key": "default", "include_graph_inventory": True})
     assert pack["pack"]["status"] == "published"
@@ -1548,14 +1560,22 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
     locator = resource_map["citations"][0]["locator"]
     assert locator["context_artifact_citation_id"]
 
-    search = call("sourcebrief.search", {"query": "pinned runtime evidence", "context_pack_key": "default", "top_k": 3})
+    search = call("sourcebrief.search", {"query": "pinned runtime evidence", "resource_ref": "F MCP Runtime", "context_pack_key": "default", "top_k": 3})
     assert search["hits"]
     assert search["hits"][0]["source_snapshot_id"]
 
-    section = call("sourcebrief.read_section", {"resource_id": resource_id, "context_artifact_citation_id": locator["context_artifact_citation_id"], "context_pack_key": "default", "context_pack_version": 1})
+    lookup = call("sourcebrief.lookup", {"query": "runtime", "search_in": "docs", "resource_ref": "F MCP Runtime", "top_k": 3})
+    assert lookup["mode"] == "docs"
+    assert lookup["docs"]["hits"]
+
+    section = call("sourcebrief.read_section", {"resource_ref": "F MCP Runtime", "context_artifact_citation_id": locator["context_artifact_citation_id"], "context_pack_key": "default", "context_pack_version": 1})
     assert "get_context_pack" in section["content"] or "runtime" in section["content"].lower()
     assert section["locator"]["context_artifact_citation_id"] == locator["context_artifact_citation_id"]
     assert section["freshness"]["resources"]
+
+    file_read = call("sourcebrief.read_file", {"resource_ref": "F MCP Runtime", "path": "README.md", "start_line": 1, "end_line": 20})
+    assert file_read["resource_id"] == resource_id
+    assert "runtime" in file_read["content"].lower()
 
     malformed = mcp("tools/call", {"name": "sourcebrief.read_section", "arguments": {"resource_id": "not-a-uuid"}})
     assert malformed["result"].get("isError") is True
