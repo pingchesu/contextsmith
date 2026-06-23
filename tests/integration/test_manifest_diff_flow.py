@@ -1205,6 +1205,8 @@ def test_graph_merge_e1_lifecycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         (repo_dir / "README.md").write_text(f"# Shared Guide\n{name}\n", encoding="utf-8")
         (repo_dir / "src").mkdir()
         (repo_dir / "src" / "common.py").write_text(f"def main():\n    return {ret!r}\n", encoding="utf-8")
+        (repo_dir / "src" / "api.py").write_text("@app.get('/v1/orders')\ndef list_orders():\n    return []\n", encoding="utf-8")
+        (repo_dir / "src" / "client.py").write_text("fetch('/v1/orders')\ntopic: 'orders.created'\nquery GetOrders { orders { id } }\nOrderService.GetOrder\ntrpc.order.get.useQuery()\n", encoding="utf-8")
         subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", f"{name}@example.com"], cwd=repo_dir, check=True)
         subprocess.run(["git", "config", "user.name", name], cwd=repo_dir, check=True)
@@ -1316,6 +1318,29 @@ def test_graph_merge_e1_lifecycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     )
     assert inputs_data.status_code == 200, inputs_data.text
     assert {row["resource_name"] for row in inputs_data.json()["items"]} == {"Merge A", "Merge B"}
+    candidate_items = []
+    page = candidates.json()
+    candidate_items.extend(page["items"])
+    while page.get("next_cursor"):
+        page_response = client.get(
+            f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/data",
+            headers=auth_headers(token),
+            params={"kind": "candidates", "limit": 20, "cursor": page["next_cursor"]},
+        )
+        assert page_response.status_code == 200, page_response.text
+        page = page_response.json()
+        candidate_items.extend(page["items"])
+    service_candidates = [row for row in candidate_items if row["candidate_type"] == "service_http_route"]
+    assert service_candidates
+    assert service_candidates[0]["review_reason"].startswith("service_http_route candidate from matcher service-link-v1")
+    assert service_candidates[0]["left"]["metadata"]["handle"] == "/v1/orders"
+    service_candidate_key = service_candidates[0]["candidate_key"]
+    accepted = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/candidates/{service_candidate_key}/review",
+        headers=auth_headers(token),
+        json={"status": "accepted", "reason": "Reviewed HTTP route/client link."},
+    )
+    assert accepted.status_code == 200, accepted.text
     candidate_key = candidates.json()["items"][0]["candidate_key"]
     reviewed = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/candidates/{candidate_key}/review",
@@ -1324,6 +1349,23 @@ def test_graph_merge_e1_lifecycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     )
     assert reviewed.status_code == 200, reviewed.text
 
+    same_inputs_recompile = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges",
+        headers=auth_headers(token),
+        json={"merge_key": merge_key, "title": "Merge Fixture", "strategy": "overlay", "inputs": [{"graph_key": "merge-a-graph", "version": graph_a_v1["version"]}, {"graph_key": "merge-b-graph", "version": graph_b_v1["version"]}]},
+    )
+    assert same_inputs_recompile.status_code == 200, same_inputs_recompile.text
+    latest = same_inputs_recompile.json()["versions"][0]
+    recarried = client.get(
+        f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/data",
+        headers=auth_headers(token),
+        params={"kind": "candidates", "limit": 100},
+    )
+    assert recarried.status_code == 200, recarried.text
+    recarried_items = recarried.json()["items"]
+    assert any(row["candidate_key"] == service_candidate_key and row["status"] == "accepted" for row in recarried_items)
+    assert any(row["candidate_key"] == candidate_key and row["status"] == "rejected" for row in recarried_items)
+
     published_merge = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/publish",
         headers=auth_headers(token),
@@ -1331,6 +1373,13 @@ def test_graph_merge_e1_lifecycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     )
     assert published_merge.status_code == 200, published_merge.text
     assert published_merge.json()["current"]["status"] == "published"
+    service_edges = client.get(
+        f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/data",
+        headers=auth_headers(token),
+        params={"kind": "edges", "limit": 200},
+    )
+    assert service_edges.status_code == 200, service_edges.text
+    assert any(edge["edge_type"] == "reviewed_service_http_route" and edge["origin"][0]["candidate_key"] == service_candidate_key for edge in service_edges.json()["items"])
 
     nodes = client.get(
         f"/workspaces/{workspace_id}/projects/{project_id}/graph-merges/{merge_key}/versions/{latest['version']}/data",

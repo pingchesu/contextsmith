@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -7,6 +9,39 @@ from sqlalchemy.orm import Session
 
 from sourcebrief_shared.code_intel import extract_code_symbols
 from sourcebrief_shared.models import GraphEdge, GraphNode, Resource, SourceSnapshot
+
+_HTTP_ROUTE = re.compile(r"@(?:app|router)\.(?:get|post|put|patch|delete)\(\s*['\"](?P<path>/[^'\"]+)")
+_HTTP_CLIENT = re.compile(r"(?:fetch|axios\.(?:get|post|put|patch|delete)|requests\.(?:get|post|put|patch|delete))\(\s*['\"](?P<path>/[^'\"]+)")
+_ASYNC_TOPIC = re.compile(r"(?:topic|channel)\s*[:=]\s*['\"](?P<name>[A-Za-z0-9_.:-]+)['\"]")
+_GRAPHQL_OPERATION = re.compile(r"\b(?:query|mutation|subscription)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+_GRPC_METHOD = re.compile(r"\b(?P<service>[A-Z][A-Za-z0-9_]+Service)\.(?P<method>[A-Za-z_][A-Za-z0-9_]*)\b")
+_TRPC_ROUTE = re.compile(r"\btrpc\.(?P<route>[A-Za-z0-9_.]+)\.(?:useQuery|useMutation|query|mutate)\b")
+
+
+def _service_endpoints(path: str, content: str) -> list[dict[str, str]]:
+    specs: list[dict[str, str]] = []
+    for matcher, kind, role in [
+        (_HTTP_ROUTE, "http_route", "server"),
+        (_HTTP_CLIENT, "http_route", "client"),
+        (_ASYNC_TOPIC, "async_topic", "producer_or_consumer"),
+        (_GRAPHQL_OPERATION, "graphql_operation", "operation"),
+        (_GRPC_METHOD, "grpc_method", "caller"),
+        (_TRPC_ROUTE, "trpc_route", "caller"),
+    ]:
+        for match in matcher.finditer(content):
+            if kind == "grpc_method":
+                handle = f"{match.group('service')}.{match.group('method')}"
+            elif kind == "trpc_route":
+                handle = match.group("route")
+            else:
+                handle = match.groupdict().get("path") or match.groupdict().get("name") or ""
+            if not handle:
+                continue
+            specs.append({"matcher_type": kind, "role": role, "handle": handle, "path": path})
+    unique: dict[tuple[str, str, str], dict[str, str]] = {}
+    for spec in specs:
+        unique[(spec["matcher_type"], spec["handle"], spec["role"])] = spec
+    return list(unique.values())
 
 
 @dataclass(frozen=True)
@@ -144,6 +179,27 @@ def build_graph_index(session: Session, resource: Resource, snapshot: SourceSnap
         nodes_created += 1
         _edge(session, resource=resource, snapshot=snapshot, source=parent, target=file_node, edge_type="contains")
         edges_created += 1
+
+        for endpoint in _service_endpoints(path, doc["content"]):
+            endpoint_id = hashlib.sha256(f"{endpoint['matcher_type']}:{endpoint['handle']}:{endpoint['role']}:{path}".encode()).hexdigest()[:16]
+            endpoint_node = _node(
+                session,
+                resource=resource,
+                snapshot=snapshot,
+                node_key=f"service:{endpoint['matcher_type']}:{endpoint_id}",
+                node_type="service_endpoint",
+                label=endpoint["handle"],
+                path=path,
+                meta={
+                    "matcher_type": endpoint["matcher_type"],
+                    "matcher_version": "service-link-v1",
+                    "role": endpoint["role"],
+                    "handle": endpoint["handle"],
+                },
+            )
+            nodes_created += 1
+            _edge(session, resource=resource, snapshot=snapshot, source=file_node, target=endpoint_node, edge_type="declares_service_endpoint", weight=2.0)
+            edges_created += 1
 
         for symbol in extract_code_symbols(doc.get("path"), doc["content"]):
             symbol_node = _node(

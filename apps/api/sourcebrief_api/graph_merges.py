@@ -161,6 +161,7 @@ def _resolve_input_versions(session: Session, workspace_id: UUID, project_id: UU
 
 
 def _origin_for_node(ordinal: int, graph: Graph, version: GraphVersion, resource: Resource, node: GraphNode) -> dict[str, Any]:
+    metadata = dict(node.meta or {})
     return {
         "input_ordinal": ordinal,
         "graph_key": graph.graph_key,
@@ -174,6 +175,8 @@ def _origin_for_node(ordinal: int, graph: Graph, version: GraphVersion, resource
         "label": node.label,
         "path": node.path,
         "node_type": node.node_type,
+        "metadata": metadata,
+        "evidence_locator": {"resource_id": str(resource.id), "source_snapshot_id": str(version.source_snapshot_id), "path": node.path},
     }
 
 
@@ -264,6 +267,7 @@ def compile_graph_merge(
             merged_key = _merged_node_key(ordinal, node)
             original_to_merged[node.id] = merged_key
             origin = _origin_for_node(ordinal, graph, version, resource, node)
+            origin["merged_node_key"] = merged_key
             metadata = dict(node.meta or {})
             if strategy == "overlay" and node.path:
                 metadata["overlay_group"] = f"path:{_normalize(node.path)}"
@@ -332,6 +336,27 @@ def compile_graph_merge(
                 )
             )
 
+    previous_reviews: dict[str, tuple[str, str | None]] = {}
+    if merge.id:
+        prior_versions = list(
+            session.scalars(
+                select(GraphMergeVersion)
+                .where(GraphMergeVersion.graph_merge_id == merge.id, GraphMergeVersion.input_hash == input_hash)
+                .order_by(GraphMergeVersion.version.desc())
+            )
+        )
+        for prior_version in prior_versions:
+            for prior_candidate in session.scalars(
+                select(GraphMergeReconcileCandidate).where(
+                    GraphMergeReconcileCandidate.graph_merge_version_id == prior_version.id,
+                    GraphMergeReconcileCandidate.status.in_(["accepted", "rejected"]),
+                )
+            ):
+                previous_reviews.setdefault(
+                    prior_candidate.candidate_key,
+                    (prior_candidate.status, prior_candidate.review_reason),
+                )
+
     candidate_seen: set[str] = set()
     flat_nodes = [(node, merged_key, origin) for *_prefix, triplets in per_input_nodes for node, merged_key, origin in triplets]
     for idx, (left_node, left_key, left_origin) in enumerate(flat_nodes):
@@ -340,7 +365,18 @@ def compile_graph_merge(
                 continue
             candidate_type = None
             confidence = 0.0
-            if left_node.path and right_node.path and _normalize(left_node.path) == _normalize(right_node.path):
+            left_meta = dict(left_node.meta or {})
+            right_meta = dict(right_node.meta or {})
+            if (
+                left_node.node_type == "service_endpoint"
+                and right_node.node_type == "service_endpoint"
+                and left_meta.get("matcher_type") == right_meta.get("matcher_type")
+                and left_meta.get("handle")
+                and left_meta.get("handle") == right_meta.get("handle")
+            ):
+                candidate_type = f"service_{left_meta['matcher_type']}"
+                confidence = 0.85
+            elif left_node.path and right_node.path and _normalize(left_node.path) == _normalize(right_node.path):
                 candidate_type = "same_path"
                 confidence = 0.9
             elif _normalize(left_node.label) and _normalize(left_node.label) == _normalize(right_node.label) and left_node.node_type == right_node.node_type:
@@ -355,6 +391,7 @@ def compile_graph_merge(
             if len(candidate_rows) >= max_merge_candidates():
                 candidate_truncated = True
                 break
+            carried_status, carried_reason = previous_reviews.get(key_candidate, ("open", None))
             candidate_rows.append(
                 GraphMergeReconcileCandidate(
                     workspace_id=workspace_id,
@@ -365,7 +402,8 @@ def compile_graph_merge(
                     left_origin_json=left_origin,
                     right_origin_json=right_origin,
                     confidence=confidence,
-                    status="open",
+                    status=carried_status,
+                    review_reason=carried_reason or f"{candidate_type} candidate from matcher service-link-v1; review before publishing as graph fact.",
                 )
             )
         if candidate_truncated:
@@ -390,7 +428,7 @@ def compile_graph_merge(
         node_count=len(node_rows),
         edge_count=len(edge_rows),
         candidate_count=len(candidate_rows),
-        unresolved_candidate_count=len(candidate_rows),
+        unresolved_candidate_count=sum(1 for row in candidate_rows if row.status == "open"),
         summary_json={"title": merge.title, "merge_key": merge.merge_key, "strategy": strategy, "input_count": len(resolved), "node_count": len(node_rows), "edge_count": len(edge_rows), "candidate_count": len(candidate_rows), "candidate_truncated": candidate_truncated},
         validation_json=validation,
         created_by=actor_id,

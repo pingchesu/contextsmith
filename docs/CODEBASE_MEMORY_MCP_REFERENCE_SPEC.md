@@ -258,6 +258,14 @@ Adapt codebase-memory-mcp's `CROSS_*` idea into SourceBrief's reviewable graph m
 - Accepted candidates can be represented in a new merge graph version with provenance.
 - Rejected candidates remain auditable and do not reappear as published facts without a newer matcher version or changed inputs.
 
+### Status
+
+Implemented in Workstream D:
+
+- Resource graph indexing derives reviewable `service_endpoint` nodes for HTTP route/client, async topic/channel, gRPC method, GraphQL operation, and tRPC route patterns.
+- Graph merge candidate generation emits `service_*` reconcile candidates with matcher version, rationale, source metadata, stable handles, and evidence locators while keeping them unpublished until review.
+- Accepted candidates materialize as reviewed merge edges only when a merge graph version is published; rejected candidate reviews carry forward for unchanged inputs.
+
 ### Verification
 
 - Unit fixtures for route/topic matching.
