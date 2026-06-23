@@ -1166,6 +1166,7 @@ class AgentContextCitation(BaseModel):
     path: str | None = None
     title: str | None = None
     ordinal: int
+    content_hash: str | None = None
     version: str
     version_kind: str
     commit: str | None = None

@@ -5,9 +5,10 @@
 Implemented in this PR:
 
 - Golden-path MCP aliases: `sourcebrief.ask`, `sourcebrief.discover`, and `sourcebrief.lookup`.
-- `sourcebrief.get_agent_context` / `sourcebrief.ask` now return `suggested_tool_calls` so agents know the next exact evidence tools to use.
-- MCP `tools/list` now orders golden-path tools first while keeping all existing tool names available.
-- `resource_ref` works for search/read-section and remote code drilldown paths where it can resolve to exactly one authorized resource.
+- `sourcebrief.get_agent_context` / `sourcebrief.ask` now return pinned `suggested_tool_calls` so agents know the next exact evidence tools to use.
+- MCP `tools/list` now orders golden-path and evidence tools before advanced graph/proposal tools while keeping all existing tool names available.
+- `resource_ref` works for ask/search/read-section and remote code drilldown paths where it can resolve to exactly one authorized resource. Context-pack search intersects `resource_ref` with pack coverage instead of widening back to the whole pack.
+- `sourcebrief.lookup` returns docs results with a warning instead of failing the whole call when a context-only token lacks `code:read`.
 
 ## Problem
 

@@ -1537,6 +1537,20 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
         "sourcebrief.graph_path",
     }.issubset(tool_names)
     assert [tool["name"] for tool in tools[:3]] == ["sourcebrief.ask", "sourcebrief.discover", "sourcebrief.lookup"]
+    assert [tool["name"] for tool in tools[:9]] == [
+        "sourcebrief.ask",
+        "sourcebrief.discover",
+        "sourcebrief.lookup",
+        "sourcebrief.get_agent_context",
+        "sourcebrief.list_sources",
+        "sourcebrief.get_architecture",
+        "sourcebrief.get_context_pack",
+        "sourcebrief.search",
+        "sourcebrief.read_section",
+    ]
+    read_file_schema = next(tool for tool in tools if tool["name"] == "sourcebrief.read_file")["inputSchema"]
+    assert read_file_schema["required"] == ["path"]
+    assert {tuple(option["required"]) for option in read_file_schema["anyOf"]} == {("resource_id",), ("resource_ref",)}
 
     sources = call("sourcebrief.list_sources", {"query": "F MCP", "limit": 10})
     assert sources["sources"]
@@ -1546,8 +1560,13 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert discovered["sources"]["sources"][0]["name"] == "F MCP Runtime bundle"
     assert discovered["architecture"]["resources"][0]["resource_id"] == resource_id
 
-    asked = call("sourcebrief.ask", {"query": "pinned runtime evidence", "resource_ids": [resource_id], "top_k": 3})
+    asked = call("sourcebrief.ask", {"query": "pinned runtime evidence", "resource_ref": "F MCP Runtime", "top_k": 3})
     assert asked["citations"]
+    assert asked["citations"][0]["content_hash"]
+    read_section_steps = [step for step in asked["suggested_tool_calls"] if step["name"] == "sourcebrief.read_section"]
+    assert read_section_steps
+    assert read_section_steps[0]["arguments"]["content_hash"] == asked["citations"][0]["content_hash"]
+    assert "allow_current_fallback" not in read_section_steps[0]["arguments"]
     assert any(step["name"] == "sourcebrief.read_file" for step in asked["suggested_tool_calls"])
 
     pack = call("sourcebrief.get_context_pack", {"pack_key": "default", "include_graph_inventory": True})
@@ -1572,10 +1591,6 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert "get_context_pack" in section["content"] or "runtime" in section["content"].lower()
     assert section["locator"]["context_artifact_citation_id"] == locator["context_artifact_citation_id"]
     assert section["freshness"]["resources"]
-
-    file_read = call("sourcebrief.read_file", {"resource_ref": "F MCP Runtime", "path": "README.md", "start_line": 1, "end_line": 20})
-    assert file_read["resource_id"] == resource_id
-    assert "runtime" in file_read["content"].lower()
 
     malformed = mcp("tools/call", {"name": "sourcebrief.read_section", "arguments": {"resource_id": "not-a-uuid"}})
     assert malformed["result"].get("isError") is True
