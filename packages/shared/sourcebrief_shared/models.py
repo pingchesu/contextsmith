@@ -492,7 +492,7 @@ class GraphMergeReconcileCandidate(Base):
     __table_args__ = (
         UniqueConstraint("graph_merge_version_id", "candidate_key", name="uq_graph_merge_candidates_version_key"),
         ForeignKeyConstraint(["graph_merge_version_id", "workspace_id", "project_id"], ["graph_merge_versions.id", "graph_merge_versions.workspace_id", "graph_merge_versions.project_id"], name="fk_graph_merge_candidates_version_scope"),
-        CheckConstraint("candidate_type IN ('same_path', 'same_label', 'same_symbol')", name="ck_graph_merge_candidates_type"),
+        CheckConstraint("candidate_type IN ('same_path', 'same_label', 'same_symbol', 'service_http_route', 'service_async_topic', 'service_grpc_method', 'service_graphql_operation', 'service_trpc_route')", name="ck_graph_merge_candidates_type"),
         CheckConstraint("status IN ('open', 'accepted', 'rejected')", name="ck_graph_merge_candidates_status"),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_graph_merge_candidates_confidence"),
     )

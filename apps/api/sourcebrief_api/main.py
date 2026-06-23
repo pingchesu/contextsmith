@@ -5713,6 +5713,47 @@ def publish_graph_merge(workspace_id: UUID, project_id: UUID, merge_key: str, ve
     current = session.get(GraphMergeVersion, merge.current_version_id) if merge.current_version_id else None
     if current and current.status == GRAPH_MERGE_VERSION_PUBLISHED:
         current.status = GRAPH_MERGE_VERSION_SUPERSEDED
+    accepted_candidates = list(
+        session.scalars(
+            select(GraphMergeReconcileCandidate).where(
+                GraphMergeReconcileCandidate.graph_merge_version_id == version.id,
+                GraphMergeReconcileCandidate.status == "accepted",
+            )
+        )
+    )
+    existing_review_edges = {
+        (row.source_merged_node_key, row.target_merged_node_key, row.edge_type)
+        for row in session.execute(
+            select(GraphMergeEdge.source_merged_node_key, GraphMergeEdge.target_merged_node_key, GraphMergeEdge.edge_type).where(
+                GraphMergeEdge.graph_merge_version_id == version.id,
+                GraphMergeEdge.edge_type.like("reviewed_%"),
+            )
+        ).all()
+    }
+    for candidate in accepted_candidates:
+        source_key = (candidate.left_origin_json or {}).get("merged_node_key")
+        target_key = (candidate.right_origin_json or {}).get("merged_node_key")
+        if not source_key or not target_key:
+            continue
+        edge_type = f"reviewed_{candidate.candidate_type}"
+        edge_tuple = (source_key, target_key, edge_type)
+        if edge_tuple in existing_review_edges:
+            continue
+        session.add(
+            GraphMergeEdge(
+                workspace_id=workspace_id,
+                project_id=project_id,
+                graph_merge_version_id=version.id,
+                source_merged_node_key=source_key,
+                target_merged_node_key=target_key,
+                edge_type=edge_type,
+                weight=candidate.confidence,
+                origin_json=[{"candidate_key": candidate.candidate_key, "left": candidate.left_origin_json, "right": candidate.right_origin_json, "review_reason": candidate.review_reason}],
+                meta={"materialized_from": "accepted_reconcile_candidate", "candidate_type": candidate.candidate_type},
+            )
+        )
+        existing_review_edges.add(edge_tuple)
+    version.edge_count = session.scalar(select(func.count()).select_from(GraphMergeEdge).where(GraphMergeEdge.graph_merge_version_id == version.id)) or version.edge_count
     version.status = GRAPH_MERGE_VERSION_PUBLISHED
     version.published_by = principal.user.id
     version.published_at = datetime.now(UTC)
