@@ -4,9 +4,11 @@
 
 ## Health checks
 
+Ports are normalized to the default quickstart values below. The capture host used a custom `SOURCEBRIEF_WEB_PORT`, but the health response is the same.
+
 ```text
 GET http://localhost:18000/readyz -> {"status":"ready"}
-GET http://localhost:3105/api/health -> {"status":"ok"}
+GET http://localhost:13000/api/health -> {"status":"ok"}
 ```
 
 ## Demo source
