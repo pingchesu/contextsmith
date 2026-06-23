@@ -425,10 +425,16 @@ def test_api_tokens_enforce_scopes_and_resource_allowlists() -> None:
         headers=bearer,
     )
     assert context.status_code == 200, context.text
-    citations = context.json()["citations"]
+    context_body = context.json()
+    citations = context_body["citations"]
     assert citations
     assert {citation["resource_id"] for citation in citations} == {resource_id}
-    assert other_resource_id not in context.json()["context"]
+    assert citations[0]["score_components"]["base_score"] >= 0
+    assert "path_prior_score" in citations[0]["score_components"]
+    assert context_body["retrieval_metadata"]["selected_count"] == len(citations)
+    assert context_body["retrieval_metadata"]["unique_citation_paths"] >= 1
+    assert "deduped_from_count" in context_body["retrieval_metadata"]
+    assert other_resource_id not in context_body["context"]
 
     empty_resource_filter = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
@@ -466,6 +472,8 @@ def test_api_tokens_enforce_scopes_and_resource_allowlists() -> None:
     assert scoped_eval_body["run_id"]
     assert scoped_eval_body["diagnostics"]["matching_embedding_count"] > 0
     assert {citation["resource_id"] for citation in scoped_eval_body["results"][0]["hit_quality"]} == {resource_id}
+    assert "score_components" in scoped_eval_body["results"][0]["hit_quality"][0]
+    assert "path_prior_score" in scoped_eval_body["results"][0]["hit_quality"][0]["score_components"]
 
     project_wide_eval = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/retrieval-evals",

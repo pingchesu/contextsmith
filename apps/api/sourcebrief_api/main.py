@@ -7338,6 +7338,33 @@ def _build_pack_agent_context_response(
     )
 
 
+def _agent_context_retrieval_metadata(candidates: list[RetrievalCandidate]) -> dict[str, Any]:
+    paths = [candidate.path for candidate in candidates if candidate.path]
+    unique_paths = {path for path in paths}
+    diversity = candidates[0].ranking_diagnostics.get("retrieval_diversity") if candidates and candidates[0].ranking_diagnostics else None
+    path_prior_hits: dict[str, int] = {}
+    for candidate in candidates:
+        diagnostics = candidate.ranking_diagnostics or {}
+        for reason in diagnostics.get("path_prior_reasons", []) or []:
+            path_prior_hits[reason] = path_prior_hits.get(reason, 0) + 1
+    metadata = {
+        "selected_count": len(candidates),
+        "unique_citation_paths": len(unique_paths),
+        "duplicate_citation_count": max(0, len(paths) - len(unique_paths)),
+        "path_prior_hits": path_prior_hits,
+    }
+    if isinstance(diversity, dict):
+        metadata["candidate_pool_count"] = diversity.get("candidate_pool_count", len(candidates))
+        metadata["deduped_from_count"] = diversity.get("deduped_from_count", 0)
+        metadata["retriever_selected_count"] = diversity.get("selected_count")
+        metadata["retriever_unique_citation_paths"] = diversity.get("unique_citation_paths")
+        metadata["retriever_duplicate_citation_count"] = diversity.get("duplicate_citation_count")
+    else:
+        metadata["candidate_pool_count"] = len(candidates)
+        metadata["deduped_from_count"] = 0
+    return metadata
+
+
 def _build_agent_context_response(
     session: Session,
     *,
@@ -7391,6 +7418,7 @@ def _build_agent_context_response(
                 commit=candidate.snapshot_metadata.get("commit"),
                 score=candidate.score,
                 graph_score=candidate.graph_score,
+                score_components=candidate.ranking_diagnostics or {},
             )
         )
     symbols: list[CodeSymbolHit] = []
@@ -7443,6 +7471,7 @@ def _build_agent_context_response(
         token_budget_hint=max(1, payload.max_chars // 4),
         resource_coverage=resource_coverage,
         coverage_warnings=coverage_warnings,
+        retrieval_metadata=_agent_context_retrieval_metadata(used_candidates),
     )
 
 
@@ -7964,6 +7993,7 @@ def run_retrieval_eval(
                         "version": citation.version,
                         "score": citation.score,
                         "graph_score": citation.graph_score,
+                        "score_components": citation.score_components,
                     }
                     for citation in response.citations
                 ],
