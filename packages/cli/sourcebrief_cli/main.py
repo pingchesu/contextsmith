@@ -91,6 +91,74 @@ def _split_csv_or_repeated(values: list[str] | None) -> list[str] | None:
     return result or None
 
 
+def _config_path() -> Path:
+    override = os.getenv("SOURCEBRIEF_CONFIG_PATH")
+    if override:
+        return Path(override).expanduser()
+    config_home = os.getenv("XDG_CONFIG_HOME")
+    if config_home:
+        return Path(config_home).expanduser() / "sourcebrief" / "config.json"
+    return Path.home() / ".config" / "sourcebrief" / "config.json"
+
+
+def _load_cli_config() -> dict[str, Any]:
+    path = _config_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SourceBriefCliError(f"invalid CLI config at {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SourceBriefCliError(f"invalid CLI config at {path}: expected object")
+    return data
+
+
+def _save_cli_config(config: dict[str, Any]) -> Path:
+    path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _selected_value(config: dict[str, Any], key: str) -> str | None:
+    value = config.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _command_uses_selected_scope(args: argparse.Namespace) -> bool:
+    if args.command in {"ask", "search", "agent-context", "mcp-context"}:
+        return True
+    return args.command == "resource" and getattr(args, "resource_command", None) == "list"
+
+
+def _apply_selected_defaults(args: argparse.Namespace, config: dict[str, Any]) -> None:
+    if not _command_uses_selected_scope(args):
+        return
+    if "workspace_id" in args.__dict__ and not args.__dict__.get("workspace_id"):
+        args.workspace_id = _selected_value(config, "workspace_id")
+    if "project_id" in args.__dict__ and not args.__dict__.get("project_id"):
+        args.project_id = _selected_value(config, "project_id")
+
+
+def _resolve_api_url(args: argparse.Namespace, config: dict[str, Any]) -> None:
+    env_api_url = os.getenv("SOURCEBRIEF_API_URL", os.getenv("CONTEXTSMITH_API_URL"))
+    explicit_api_url = args.api_url is not None
+    args._api_url_explicit = explicit_api_url
+    args.api_url = args.api_url or env_api_url or _selected_value(config, "api_url") or DEFAULT_API_URL
+
+
+def _require_scope(args: argparse.Namespace, *, workspace: bool = True, project: bool = True) -> None:
+    missing: list[str] = []
+    if workspace and "workspace_id" in args.__dict__ and not args.__dict__.get("workspace_id"):
+        missing.append("--workspace-id")
+    if project and "project_id" in args.__dict__ and not args.__dict__.get("project_id"):
+        missing.append("--project-id")
+    if missing:
+        joined = " and ".join(missing)
+        raise SourceBriefCliError(f"{joined} required; pass it explicitly or run sourcebrief use first")
+
+
 def _wait_for_run(client: SourceBriefClient, workspace_id: str, index_run_id: str, timeout: int) -> dict[str, Any]:
     deadline = time.time() + timeout
     current: dict[str, Any] = {"status": "queued", "id": index_run_id}
@@ -106,6 +174,42 @@ def _wait_for_run(client: SourceBriefClient, workspace_id: str, index_run_id: st
 
 def cmd_health(client: SourceBriefClient, _args: argparse.Namespace) -> Any:
     return client.request("GET", "/readyz")
+
+
+def cmd_use(_client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    config = dict(getattr(args, "_sourcebrief_config", {}) or {})
+    if args.clear:
+        config.pop("workspace_id", None)
+        config.pop("project_id", None)
+    if args.workspace_id:
+        config["workspace_id"] = args.workspace_id
+        if not args.project_id and not args.clear:
+            config.pop("project_id", None)
+    if args.project_id:
+        config["project_id"] = args.project_id
+    if getattr(args, "_api_url_explicit", False) or "api_url" not in config:
+        config["api_url"] = args.api_url.rstrip("/")
+    path = _save_cli_config(config)
+    return {
+        "status": "saved",
+        "config_path": str(path),
+        "api_url": config.get("api_url"),
+        "workspace_id": config.get("workspace_id"),
+        "project_id": config.get("project_id"),
+    }
+
+
+def cmd_status(_client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    config = getattr(args, "_sourcebrief_config", {}) or {}
+    return {
+        "config_path": str(_config_path()),
+        "api_url": args.api_url.rstrip("/"),
+        "workspace_id": _selected_value(config, "workspace_id"),
+        "project_id": _selected_value(config, "project_id"),
+        "auth_mode": "bearer_token" if args.token else "email_header",
+        "email": None if args.token else args.email,
+        "token_set": bool(args.token),
+    }
 
 
 def cmd_workspace_create(client: SourceBriefClient, args: argparse.Namespace) -> Any:
@@ -276,6 +380,7 @@ def cmd_resource_refresh(client: SourceBriefClient, args: argparse.Namespace) ->
 
 
 def cmd_resource_list(client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    _require_scope(args)
     return client.request("GET", f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources")
 
 
@@ -305,6 +410,7 @@ def cmd_resource_schedule_due(client: SourceBriefClient, args: argparse.Namespac
 
 
 def cmd_search(client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    _require_scope(args)
     return client.request(
         "POST",
         f"/workspaces/{args.workspace_id}/projects/{args.project_id}/search",
@@ -313,6 +419,7 @@ def cmd_search(client: SourceBriefClient, args: argparse.Namespace) -> Any:
 
 
 def cmd_agent_context(client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    _require_scope(args)
     return client.request(
         "POST",
         f"/workspaces/{args.workspace_id}/projects/{args.project_id}/agent-context",
@@ -328,6 +435,7 @@ def cmd_agent_context(client: SourceBriefClient, args: argparse.Namespace) -> An
 
 
 def cmd_mcp_context(client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    _require_scope(args)
     return client.request(
         "POST",
         f"/mcp/{args.workspace_id}/{args.project_id}",
@@ -428,7 +536,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sourcebrief", description="SourceBrief CLI")
     parser.add_argument(
         "--api-url",
-        default=os.getenv("SOURCEBRIEF_API_URL", os.getenv("CONTEXTSMITH_API_URL", DEFAULT_API_URL)),
+        default=None,
+        help="SourceBrief API URL; overrides SOURCEBRIEF_API_URL and saved sourcebrief use config",
     )
     parser.add_argument(
         "--email",
@@ -446,6 +555,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     health = sub.add_parser("health", help="check API readiness")
     health.set_defaults(func=cmd_health)
+
+    use = sub.add_parser(
+        "use",
+        help="save default workspace/project for later read/query commands",
+        description=f"Save CLI defaults in {_config_path()}. Explicit flags still override saved values.",
+    )
+    use.add_argument("--workspace-id", help="workspace ID to save; changing it without --project-id clears the saved project")
+    use.add_argument("--project-id", help="project ID to save")
+    use.add_argument("--clear", action="store_true", help="clear saved workspace/project before applying new values")
+    use.set_defaults(func=cmd_use)
+
+    status = sub.add_parser("status", help="show selected CLI defaults and auth mode without secrets")
+    status.set_defaults(func=cmd_status)
 
     ws = sub.add_parser("workspace", help="workspace commands").add_subparsers(dest="workspace_command")
     ws_create = ws.add_parser("create", help="create a workspace")
@@ -526,8 +648,8 @@ def build_parser() -> argparse.ArgumentParser:
     refresh.set_defaults(func=cmd_resource_refresh)
 
     list_resources = resources.add_parser("list", help="list resources")
-    list_resources.add_argument("--workspace-id", required=True)
-    list_resources.add_argument("--project-id", required=True)
+    list_resources.add_argument("--workspace-id")
+    list_resources.add_argument("--project-id")
     list_resources.set_defaults(func=cmd_resource_list)
 
     restore = resources.add_parser("restore", help="restore an archived or soft-deleted resource")
@@ -567,16 +689,31 @@ def build_parser() -> argparse.ArgumentParser:
     agent_profile.set_defaults(func=cmd_agent_profile)
 
     search = sub.add_parser("search", help="search project context")
-    search.add_argument("--workspace-id", required=True)
-    search.add_argument("--project-id", required=True)
+    search.add_argument("--workspace-id")
+    search.add_argument("--project-id")
     search.add_argument("--query", required=True)
     search.add_argument("--resource-id", action="append")
     search.add_argument("--top-k", type=int, default=10)
     search.set_defaults(func=cmd_search)
 
+    ask = sub.add_parser(
+        "ask",
+        help="ask SourceBrief for cited project context",
+        description="Ask SourceBrief for cited context. Workspace/project can come from explicit flags or `sourcebrief use`.",
+    )
+    ask.add_argument("query", help="question to answer from cited project evidence")
+    ask.add_argument("--workspace-id", help="workspace ID; overrides saved sourcebrief use value")
+    ask.add_argument("--project-id", help="project ID; overrides saved sourcebrief use value")
+    ask.add_argument("--runtime", default="api", choices=["api", "hermes", "claude", "codex", "cursor"])
+    ask.add_argument("--resource-id", action="append")
+    ask.add_argument("--top-k", type=int, default=8)
+    ask.add_argument("--max-chars", type=int, default=12000)
+    ask.add_argument("--no-code-symbols", dest="include_code_symbols", action="store_false")
+    ask.set_defaults(func=cmd_agent_context, include_code_symbols=True)
+
     agent = sub.add_parser("agent-context", help="request runtime-shaped context")
-    agent.add_argument("--workspace-id", required=True)
-    agent.add_argument("--project-id", required=True)
+    agent.add_argument("--workspace-id")
+    agent.add_argument("--project-id")
     agent.add_argument("--query", required=True)
     agent.add_argument("--runtime", default="api", choices=["api", "hermes", "claude", "codex", "cursor"])
     agent.add_argument("--resource-id", action="append")
@@ -586,8 +723,8 @@ def build_parser() -> argparse.ArgumentParser:
     agent.set_defaults(func=cmd_agent_context, include_code_symbols=True)
 
     mcp = sub.add_parser("mcp-context", help="call the central MCP context tool")
-    mcp.add_argument("--workspace-id", required=True)
-    mcp.add_argument("--project-id", required=True)
+    mcp.add_argument("--workspace-id")
+    mcp.add_argument("--project-id")
     mcp.add_argument("--query", required=True)
     mcp.add_argument("--runtime", default="api", choices=["api", "hermes", "claude", "codex", "cursor"])
     mcp.add_argument("--resource-id", action="append")
@@ -650,7 +787,7 @@ def _print_default(command: str | None, data: Any) -> None:
             for hit in data.get("hits", []):
                 print(f"- {hit.get('path') or hit.get('title') or hit.get('resource_id')}: {hit.get('snippet')}")
             return
-        if command in {"agent-context", "mcp-context", "agent", "token", "runtime"}:
+        if command in {"agent-context", "mcp-context", "ask", "agent", "token", "runtime", "use", "status"}:
             _print_json(data)
             return
     _print_json(data)
@@ -662,6 +799,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.func is None:
         parser.print_help(sys.stderr)
         return 2
+    try:
+        try:
+            config = _load_cli_config()
+        except SourceBriefCliError:
+            if args.command == "use" and getattr(args, "clear", False):
+                config = {}
+            else:
+                raise
+        args._sourcebrief_config = config
+        _resolve_api_url(args, config)
+        _apply_selected_defaults(args, config)
+    except SourceBriefCliError as exc:
+        print(f"sourcebrief: error: {exc}", file=sys.stderr)
+        return 1
     client = SourceBriefClient(args.api_url, args.email, token=args.token)
     try:
         data = args.func(client, args)
