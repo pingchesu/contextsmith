@@ -51,6 +51,7 @@ SourceBrief is an early alpha for local development and product exploration. The
 - Workbench for scoped questions and cited context.
 - Quality/review surfaces.
 - Graph, graph merge, repo agent, agent profile, and Skill Export surfaces.
+- Product walkthrough screenshots, GIF, and proof artifact manifest for local alpha demos.
 
 ### Quality/release gate
 
@@ -66,7 +67,6 @@ SourceBrief is an early alpha for local development and product exploration. The
 - Large-repo progress UI, skipped-file reports, cancel/retry controls, and indexing explainability.
 - Graph merge hardening for enterprise cross-repo workflows.
 - Skill Pack generation quality and real-world package evaluation.
-- Public screenshots, demo GIFs, and polished product walkthrough assets.
 
 ## Not alpha-ready / non-goals today
 

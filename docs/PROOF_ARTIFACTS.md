@@ -1,0 +1,75 @@
+# Proof artifacts
+
+SourceBrief documentation should show real evidence, not polished fiction. This page is the manifest for committed proof artifacts and the gaps that still need capture.
+
+## What counts as proof
+
+A proof artifact must be one of:
+
+- a screenshot or GIF captured from a live local SourceBrief stack;
+- a normalized API/CLI/MCP response captured from a live local run;
+- an automated real-service integration test that exercises the behavior against Postgres/Redis/API code;
+- an explicit follow-up entry saying the artifact is not captured yet.
+
+Do not add mock screenshots, invented JSON, fake IDs, or hand-written "sample" output unless it is clearly labeled as illustrative and not proof.
+
+## Committed visual proof
+
+| Artifact | What it proves | Source |
+| --- | --- | --- |
+| Product walkthrough GIF | Command Center -> Sources -> Workbench citation loop. | [`assets/sourcebrief-product-walkthrough.gif`](assets/sourcebrief-product-walkthrough.gif), [`WALKTHROUGH.md`](WALKTHROUGH.md) |
+| Command Center screenshot | Project readiness entry point. | [`assets/screenshots/sourcebrief-command-center.png`](assets/screenshots/sourcebrief-command-center.png) |
+| Sources screenshot | Connected sources, indexing state, freshness/review surface. | [`assets/screenshots/sourcebrief-sources.png`](assets/screenshots/sourcebrief-sources.png) |
+| Workbench citations screenshot | Human-visible cited context packet. | [`assets/screenshots/sourcebrief-workbench-citations.png`](assets/screenshots/sourcebrief-workbench-citations.png) |
+| Mental model diagram | Source -> snapshot -> evidence -> runtime flow. | [`assets/sourcebrief-mental-model.svg`](assets/sourcebrief-mental-model.svg) |
+| Agent workflow diagram | Agent asks SourceBrief before local edit/test. | [`assets/sourcebrief-agent-workflow.svg`](assets/sourcebrief-agent-workflow.svg) |
+| Trust boundary diagram | Read-only evidence service vs local runtime mutation boundaries. | [`assets/sourcebrief-trust-boundary.svg`](assets/sourcebrief-trust-boundary.svg) |
+
+## Committed runtime output proof
+
+| Artifact | What it proves | Source |
+| --- | --- | --- |
+| Demo runtime output | Tiny deterministic source -> indexed snapshot -> `agent-context` and MCP-shaped response. | [`examples/demo-runtime-output.md`](examples/demo-runtime-output.md), [`DEMO.md`](DEMO.md) |
+| Agent-context output | Real local walkthrough query returned cited context from indexed resources. | [`examples/agent-context-output.md`](examples/agent-context-output.md), [`WALKTHROUGH.md`](WALKTHROUGH.md) |
+
+Internal UUIDs and token values are normalized or omitted in committed examples. That keeps the artifact readable and safe while preserving the response shape, citation policy, and runtime contract.
+
+## Automated proof paths
+
+These are not screenshots, but they are stronger than prose because they run against real services when `SOURCEBRIEF_RUN_REAL_INTEGRATION=1` is set.
+
+| Behavior | Test evidence |
+| --- | --- |
+| Expanded MCP tools, aliases, `resource_ref`, pinned `read_section`, Context Pack scoping, graph overview. | `tests/integration/test_manifest_diff_flow.py::test_expanded_mcp_runtime_tools_f` |
+| Agent-context API and MCP `tools/list` / `tools/call` contract. | `tests/integration/test_agent_integrations_flow.py::test_agent_context_api_and_mcp_tool_call` |
+| Remote code search/grep/read/symbol MCP flow. | `tests/integration/test_remote_code_tools_flow.py::test_remote_code_http_and_mcp_flow` |
+| Runtime setup/doctor/token preset behavior. | `tests/unit/test_cli.py` doctor/runtime/token tests plus real local smoke recorded in PR #68. |
+| CLI selected defaults and `ask` golden path. | `tests/unit/test_cli.py` selected-default and ask tests plus real local smoke recorded in PR #67. |
+
+Run the focused real-service proof:
+
+```bash
+SOURCEBRIEF_RUN_REAL_INTEGRATION=1 uv run python -m pytest \
+  tests/integration/test_manifest_diff_flow.py::test_expanded_mcp_runtime_tools_f \
+  tests/integration/test_agent_integrations_flow.py::test_agent_context_api_and_mcp_tool_call \
+  tests/integration/test_remote_code_tools_flow.py::test_remote_code_http_and_mcp_flow -q
+```
+
+Run the full local release gate:
+
+```bash
+make verify
+```
+
+## Proof gaps / follow-ups
+
+These are intentionally not faked in the current docs.
+
+| Gap | Current status | Follow-up |
+| --- | --- | --- |
+| Resource Map rendered output | Real behavior is covered by API/integration paths, but no committed human-facing screenshot/output excerpt yet. | Capture Resource Map UI/API output from a real local run. |
+| Context Pack rendered output | Context Pack behavior is covered by real integration tests, but no committed response excerpt yet. | Capture `get_context_pack` and pack-scoped `ask` output with normalized IDs. |
+| Skill Export package example | Product behavior exists, but no committed approved export file tree/output excerpt yet. | Capture a real approved export manifest and validation report with IDs normalized. |
+| Runtime doctor terminal transcript | CLI behavior is covered by tests and PR proof, but no stable committed transcript yet. | Capture `sourcebrief doctor --query` and `runtime setup hermes --dry-run` output from a clean local run. |
+
+When adding one of these artifacts, include the command, stack assumptions, redaction policy, and what would fail if the feature regressed.

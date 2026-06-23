@@ -1,48 +1,57 @@
 # SourceBrief docs
 
-Use this page as a map. If you are new, follow the first section in order; the design specs and milestone archive are not required for normal use.
+Use this page as a map. New readers should stay in the **primary path** first; specs and milestones are archive/reference material, not onboarding.
 
-## Start here: understand the product
+## Primary path
 
-1. [Product walkthrough](WALKTHROUGH.md) - see real UI screenshots and a captured `agent-context` response before installing anything.
-2. [5-minute demo](DEMO.md) - use a tiny deterministic source to prove the indexed-evidence and MCP-shaped path quickly.
-3. [Demo runtime output](examples/demo-runtime-output.md) - normalized output from a real local run of that demo.
-4. [Concepts](CONCEPTS.md) - learn the minimum vocabulary: Source, Snapshot, Citation, Agent Context, Resource Map, Context Pack, Skill Pack, and MCP tools.
-5. [Project status](STATUS.md) - understand what is shipped, experimental, and intentionally not production/SaaS-ready yet.
+| Step | Doc | Why read it |
+| --- | --- | --- |
+| 1 | [README](../README.md) | Product promise, diagrams, trust boundaries, and local start. |
+| 2 | [Product walkthrough](WALKTHROUGH.md) | Real UI screenshots and captured `agent-context` output before installing. |
+| 3 | [Concepts](CONCEPTS.md) | Source -> Snapshot -> Evidence -> Review -> Runtime mental model. |
+| 4 | [Quick start](QUICKSTART.md) | Run the local stack and reach the first cited answer. |
+| 5 | [Agent runtime usage](AGENT_RUNTIME_USAGE.md) | Connect Hermes, Claude Code, Codex, Cursor, or MCP clients. |
 
-## Run SourceBrief locally
+## Proof and demos
 
-- [Quick start](QUICKSTART.md) - start the local stack, open the web console, connect a source, ask in Workbench, and reach the first useful SourceBrief product moment.
-- [Guide](GUIDE.md) - hands-on API/CLI walkthrough for workspaces, projects, resources, search, context packets, MCP calls, review, and Git imports.
+| Doc | Status | What it proves |
+| --- | --- | --- |
+| [Proof artifacts](PROOF_ARTIFACTS.md) | Proof manifest | Which screenshots, outputs, and tests are real; which proof gaps remain. |
+| [5-minute demo](DEMO.md) | Deterministic local demo | Tiny source -> indexed snapshot -> cited agent context -> MCP-shaped response. |
+| [Demo runtime output](examples/demo-runtime-output.md) | Captured output | Normalized output from a real local demo run. |
+| [Captured agent-context output](examples/agent-context-output.md) | Captured output | Normalized response from the product walkthrough run. |
 
-## Use SourceBrief with agents
+## Runtime and operations
 
-- [Agent runtime usage](AGENT_RUNTIME_USAGE.md) - practical Hermes, Claude Code, Codex, Cursor, MCP, skill, and remote-code workflows.
-- [Runtime install plan](RUNTIME_INSTALL_PLAN.md) - generate dry-run Hermes, Claude, or Codex connection plans, review scopes/config, validate MCP, and roll back without silent local profile mutation.
-- [Captured agent-context output](examples/agent-context-output.md) - normalized example of a real runtime-shaped response.
+| Doc | Status | Use it for |
+| --- | --- | --- |
+| [Agent runtime usage](AGENT_RUNTIME_USAGE.md) | Active runtime guide | MCP tools, runtime-specific setup, token scopes, skills, remote-code safety, failure modes. |
+| [Runtime install plan](RUNTIME_INSTALL_PLAN.md) | Active runtime guide | Dry-run setup plans, validation, apply boundary, rollback receipts. |
+| [Operations](OPERATIONS.md) | Active runbook | Health checks, logs, queues, migrations, stuck jobs, rollback, restore/purge, reset. |
+| [Project status](STATUS.md) | Active status | Shipped alpha capabilities, experimental areas, non-goals, safe wording. |
 
-## Understand the system
+## Product and architecture reference
 
-- [Architecture](ARCHITECTURE.md) - system design and runtime components: FastAPI, PostgreSQL/pgvector, Redis/RQ workers, Next.js, agent-context, MCP routes, graph/code-symbol retrieval, and tenant boundaries.
-- [Operations](OPERATIONS.md) - health checks, logs, queues, migrations, stuck jobs, rollback, restore, purge lifecycle, and local reset.
-- [Alpha release notes](ALPHA_RELEASE_NOTES.md) - shipped alpha capabilities and explicit non-goals.
+| Doc | Status | Use it for |
+| --- | --- | --- |
+| [Architecture](ARCHITECTURE.md) | Active reference | FastAPI, Postgres/pgvector, Redis/RQ, Next.js, agent-context, MCP, graph/code-symbol retrieval, tenant boundaries. |
+| [Guide](GUIDE.md) | API/CLI reference | Hands-on API/CLI walkthroughs beyond the quick start. |
+| [Alpha release notes](ALPHA_RELEASE_NOTES.md) | Release reference | Alpha capability summary and explicit boundaries. |
+| [Roadmap](ROADMAP.md) | Planning reference | Finite alpha roadmap and future work. |
+| [Git repo import product gaps](GIT_REPO_IMPORT_PRODUCT_GAPS.md) | Product backlog | Enterprise Git onboarding gaps. |
 
-## Trust, status, and product gaps
+## Deep specs
 
-- [Project status](STATUS.md) - deployment readiness, alpha limits, experimental areas, and future work.
-- [Git repo import product gaps](GIT_REPO_IMPORT_PRODUCT_GAPS.md) - enterprise product backlog for Git source onboarding.
-- [Roadmap](ROADMAP.md) - finite alpha roadmap after the first milestone set.
+These documents are for contributors and reviewers. They are useful when changing the product, but they are not the first read for users.
 
-## Deep reference and design specs
+| Doc | Status |
+| --- | --- |
+| [Product spec](SPEC.md) | Deep reference |
+| [Codebase Memory MCP reference spec](CODEBASE_MEMORY_MCP_REFERENCE_SPEC.md) | Deep reference / follow-up roadmap |
+| [Remote repo agent skill pack spec](REMOTE_REPO_AGENT_SKILL_PACK_SPEC.md) | Deep reference |
+| [Context Artifact Compiler repo-agent spec](CONTEXT_ARTIFACT_COMPILER_REPO_AGENT_SPEC.md) | Deep reference |
 
-These documents are design/reference material. They are useful for contributors and reviewers, but they should not be the first read for new users.
-
-- [Product spec](SPEC.md) - broad product and architecture specification.
-- [Codebase Memory MCP reference spec](CODEBASE_MEMORY_MCP_REFERENCE_SPEC.md) - follow-up roadmap for runtime onboarding, cross-repo context, graph views, service-link candidates, and indexing/search POCs.
-- [Remote repo agent skill pack spec](REMOTE_REPO_AGENT_SKILL_PACK_SPEC.md) - adapter and package design notes.
-- [Context Artifact Compiler repo-agent spec](CONTEXT_ARTIFACT_COMPILER_REPO_AGENT_SPEC.md) - repo agent lifecycle and compiler direction.
-
-Context Artifact Compiler specs live in [`context-artifact-compiler/`](context-artifact-compiler/):
+Context Artifact Compiler specs:
 
 - [A1 Manifest model](context-artifact-compiler/A1-manifest-model-spec.md)
 - [A2 Folder upload](context-artifact-compiler/A2-folder-upload-spec.md)
@@ -57,9 +66,18 @@ Context Artifact Compiler specs live in [`context-artifact-compiler/`](context-a
 - [E1 Graph merge v0](context-artifact-compiler/E1-graph-merge-v0-spec.md)
 - [F Expanded MCP tools](context-artifact-compiler/F-expanded-mcp-tools-spec.md)
 
-## Implementation history
+## Follow-up trackers
 
-Milestone documents are retained as implementation history. They explain how the alpha was built, but they are archive material.
+These are active planning docs for productization work that is not fully closed yet.
+
+- [CLI ergonomics golden path](followups/CLI_ERGONOMICS_GOLDEN_PATH.md)
+- [Runtime setup / doctor](followups/RUNTIME_SETUP_DOCTOR.md)
+- [MCP tool UX simplification](followups/MCP_TOOL_UX_SIMPLIFICATION.md)
+- [Deep docs proof and IA cleanup](followups/DOCS_DEEP_PROOF_CLEANUP.md)
+
+## Archive: implementation history
+
+Milestone documents explain how the alpha was built. Keep them for traceability, but do not use them as onboarding docs.
 
 - [M1 Foundation runtime](MILESTONE-1.md)
 - [M2 Resource ingestion and lexical search](MILESTONE-2.md)
@@ -76,4 +94,4 @@ Milestone documents are retained as implementation history. They explain how the
 - [M16 Hermes/MCP integration pack](MILESTONE-16.md)
 - [M17 Open-source alpha packaging](MILESTONE-17.md)
 - [M18 Alpha evaluation and release gate](MILESTONE-18.md)
-- [Later milestones](MILESTONE-23.md), [M27](MILESTONE-27.md), [M28](MILESTONE-28.md), [M29](MILESTONE-29.md), [M30 runtime install plan](MILESTONE-30.md)
+- [M23](MILESTONE-23.md), [M27](MILESTONE-27.md), [M28](MILESTONE-28.md), [M29](MILESTONE-29.md), [M30 runtime install plan](MILESTONE-30.md)
