@@ -11,6 +11,16 @@ import type { AgentContextResponse, ContextArtifact, ContextPackSummary, Context
 type ResourceType = 'git' | 'url' | 'markdown' | 'upload' | 'folder_bundle';
 type GitDraft = { branch: string; clone_timeout: string; max_file_bytes: string; max_repo_files: string; max_repo_bytes: string; update_frequency: string };
 
+const SAMPLE_MARKDOWN = `# SourceBrief sample runbook
+
+This deterministic sample proves that SourceBrief can connect a source, index it, and return cited context.
+
+## First question to ask
+What does this sample runbook prove, and which section should a reviewer inspect first?
+
+## Operational boundary
+This sample is public, local to the SourceBrief project, and safe for first-run demos.`;
+
 function defaultUri(type: ResourceType) {
   if (type === 'git') return 'https://github.com/owner/repo.git';
   if (type === 'url') return 'https://example.com/docs';
@@ -264,8 +274,24 @@ export default function SourcesPage() {
     setType(next);
     setUri(defaultUri(next));
     setName(defaultName(next));
+    setContent(next === 'markdown' ? SAMPLE_MARKDOWN : '');
+    setFilename(next === 'upload' ? 'notes.txt' : filename);
     setSupersedesResourceId(null);
-    if (next === 'folder_bundle') setFrequency('manual');
+    setFrequency(next === 'folder_bundle' ? 'manual' : 'daily');
+  }
+
+  function useSampleMarkdown() {
+    setConnectOpen(true);
+    setType('markdown');
+    setName('SourceBrief sample runbook');
+    setUri('doc://sourcebrief-sample-runbook.md');
+    setContent(SAMPLE_MARKDOWN);
+    setFrequency('manual');
+    setRefreshNow(true);
+    setZipFile(null);
+    setSupersedesResourceId(null);
+    setConnectResult(null);
+    setConnectError(null);
   }
 
   function openConnectSource() {
@@ -273,7 +299,11 @@ export default function SourcesPage() {
     setType('git');
     setName(defaultName('git'));
     setUri(defaultUri('git'));
+    setBranch('main');
     setFrequency('daily');
+    setContent('');
+    setFilename('notes.txt');
+    setRefreshNow(true);
     setZipFile(null);
     setSupersedesResourceId(null);
     setConnectResult(null);
@@ -590,8 +620,9 @@ export default function SourcesPage() {
       title="Connected sources and lifecycle"
       description="Every context source from connect through indexing, review, and retrieval. Select a source to inspect its evidence and run maintenance in place."
       actions={<>
-        <button className="btn" onClick={openConnectSource}>{connectOpen ? 'Close connect' : 'Connect source'}</button>
-        <button className="btn secondary" onClick={() => reload()} disabled={loading}>{loading ? 'Loading…' : 'Reload'}</button>
+        <button type="button" className="btn" onClick={openConnectSource}>{connectOpen ? 'Close connect' : 'Connect source'}</button>
+        <button type="button" className="btn secondary" onClick={useSampleMarkdown}>Use sample source</button>
+        <button type="button" className="btn secondary" onClick={() => reload()} disabled={loading}>{loading ? 'Loading…' : 'Reload'}</button>
       </>}
     />
 
@@ -639,8 +670,8 @@ export default function SourcesPage() {
       </div>
     </section>
     {connectOpen ? <section className="card connect-panel">
-      <div className="section-card-head"><div><h2 className="section-card-title">Connect a source</h2><p className="muted section-card-desc">Pick a source type — only the fields it needs are shown. New sources appear in the list and are selected automatically.</p></div></div>
-      <form className="grid two" onSubmit={submitConnect}>
+      <div className="section-card-head"><div><h2 className="section-card-title">Connect a source</h2><p className="muted section-card-desc">Pick a source type — only the fields it needs are shown. New sources appear in the list and are selected automatically.</p></div><button type="button" className="btn secondary" onClick={useSampleMarkdown}>Fill sample Markdown</button></div>
+      <form className="grid two" aria-label="Connect source form" onSubmit={submitConnect}>
         <div className="grid">
           <Field label="Source type"><select className="input" value={type} onChange={(event) => changeType(event.target.value as ResourceType)}><option value="git">Git repository</option><option value="folder_bundle">Folder bundle (.zip)</option><option value="url">URL / web page</option><option value="markdown">Markdown / inline doc</option><option value="upload">Upload text</option></select></Field>
           {supersedesResourceId ? <div className="notice">Uploading a new version of {name}. SourceBrief keeps the same family label and compares it to the previous manifest.</div> : <Field label="Name"><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></Field>}
@@ -652,11 +683,11 @@ export default function SourcesPage() {
           {type === 'folder_bundle'
             ? <div className="notice">Folder bundles are updated manually. Upload a new zip when the folder changes.</div>
             : <div className="grid two"><Field label="Update frequency"><select className="input" value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="manual">manual</option><option value="hourly">hourly</option><option value="daily">daily</option><option value="weekly">weekly</option></select></Field><label className={`scope-pill ${refreshNow ? 'active' : ''}`}><input type="checkbox" checked={refreshNow} onChange={(event) => setRefreshNow(event.target.checked)} /> Create index immediately</label></div>}
-          <button className="btn" disabled={connectBusy}>{connectBusy ? 'Connecting…' : 'Connect source'}</button>
+          <button type="submit" className="btn" disabled={connectBusy}>{connectBusy ? 'Connecting…' : 'Connect source'}</button>
         </div>
         <div className="grid">
           {connectError ? <div className="notice error">{connectError}</div> : null}
-          {connectResult ? <div className="notice">Source connected — {refreshNow ? 'now indexing' : 'not yet indexed'}. <strong>{connectResult.name}</strong> is selected in the list.</div> : <div className="empty">Connected sources are added to the list and indexed when requested. Private-source credentials will be handled by named connections in Settings.</div>}
+          {connectResult ? <div className="notice"><strong>Source connected.</strong><div className="muted">{refreshNow ? 'Indexing has started; watch Index activity for queued/running/succeeded status.' : 'Indexing was not started yet; run Reindex when you are ready.'}</div><div style={{ marginTop: 8 }}><strong>{connectResult.name}</strong> is selected in the list.</div><div className="toolbar" style={{ marginTop: 8 }}><button type="button" className="btn secondary" onClick={() => void previewSelected()} disabled={previewBusy}>{previewBusy ? 'Generating…' : 'Preview this source'}</button><a className="btn secondary" href="/workbench">Ask in Workbench</a></div></div> : <div className="empty">Connected sources are added to the list and indexed when requested. For a deterministic first run, use “Fill sample Markdown”, connect it, then preview or ask it in Workbench.</div>}
         </div>
       </form>
     </section> : null}
@@ -664,7 +695,7 @@ export default function SourcesPage() {
     <div className="grid two">
       <SectionCard title="Sources" description="Attention-first: failed, stale, not indexed, and unreviewed sources lead.">
         {sortedResources.length === 0
-          ? <div className="grid"><EmptyState text="No sources connected yet. Connect a git repo, URL, or document to start building context." /><button className="btn" onClick={openConnectSource}>Connect source</button></div>
+          ? <div className="grid"><EmptyState text="No sources connected yet. Use the sample Markdown to prove the full connect → index → cited context flow, or connect your own git repo, URL, or document." /><div className="toolbar"><button type="button" className="btn" onClick={openConnectSource}>Connect source</button><button type="button" className="btn secondary" onClick={useSampleMarkdown}>Use sample source</button></div></div>
           : <div className="table-wrap"><table>
             <thead><tr><th>Source</th><th>Readiness</th><th>Freshness</th><th>Index</th><th>Review</th><th>Uses</th><th>Action</th></tr></thead>
             <tbody>

@@ -359,7 +359,19 @@ def _cors_origins() -> list[str]:
     raw = os.getenv("SOURCEBRIEF_CORS_ORIGINS", os.getenv("CONTEXTSMITH_CORS_ORIGINS"))
     if raw:
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return ["http://localhost:13000", "http://127.0.0.1:13000"]
+    # Keep the packaged/demo web port and common local dev/e2e Next.js ports in
+    # the default allow-list. Otherwise the first-source browser flow fails as a
+    # CORS-only "Failed to fetch" even though the form submitted correctly.
+    return [
+        "http://localhost:13000",
+        "http://127.0.0.1:13000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3105",
+        "http://127.0.0.1:3105",
+        "http://localhost:3205",
+        "http://127.0.0.1:3205",
+    ]
 
 
 app.add_middleware(
