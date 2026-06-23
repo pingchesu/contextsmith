@@ -7099,6 +7099,13 @@ def _build_pack_agent_context_response(
     principal: Principal,
     pack_version: ContextPackVersion,
 ) -> AgentContextResponse:
+    predicates = [
+        ContextPackArtifact.context_pack_version_id == pack_version.id,
+        ContextArtifactCitation.workspace_id == workspace_id,
+        ContextArtifactCitation.project_id == project_id,
+    ]
+    if payload.resource_ids:
+        predicates.append(ContextArtifactCitation.resource_id.in_(payload.resource_ids))
     rows = session.execute(
         select(ContextArtifactCitation, SnapshotFile)
         .join(
@@ -7107,11 +7114,7 @@ def _build_pack_agent_context_response(
             & (SnapshotFile.path == ContextArtifactCitation.normalized_path),
         )
         .join(ContextPackArtifact, ContextPackArtifact.context_artifact_id == ContextArtifactCitation.context_artifact_id)
-        .where(
-            ContextPackArtifact.context_pack_version_id == pack_version.id,
-            ContextArtifactCitation.workspace_id == workspace_id,
-            ContextArtifactCitation.project_id == project_id,
-        )
+        .where(*predicates)
         .order_by(ContextPackArtifact.ordinal.asc(), ContextArtifactCitation.normalized_path.asc(), ContextArtifactCitation.ordinal.asc())
         .limit(payload.top_k)
     ).all()

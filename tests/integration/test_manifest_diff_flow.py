@@ -1465,6 +1465,18 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
         },
     )
     resource_id = upload["resource"]["id"]
+    other_upload = upload_bundle(
+        client,
+        workspace_id,
+        project_id,
+        token,
+        "F MCP Other bundle",
+        {
+            "README.md": b"# Other MCP\nThis second pack resource is noise for resource_ref narrowing.",
+            "docs/other.md": b"# Other\nAgents must not cite this when resource_ref selects the runtime bundle.",
+        },
+    )
+    other_resource_id = other_upload["resource"]["id"]
 
     artifact = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/context-artifacts/resource-map",
@@ -1478,10 +1490,22 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
         json={"acknowledge_warnings": True, "comment": "Approve for F MCP runtime."},
     )
     assert approved.status_code == 200, approved.text
+    other_artifact = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources/{other_resource_id}/context-artifacts/resource-map",
+        headers=auth_headers(token),
+    )
+    assert other_artifact.status_code == 200, other_artifact.text
+    other_artifact_id = other_artifact.json()["id"]
+    other_approved = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/context-artifacts/{other_artifact_id}/approve",
+        headers=auth_headers(token),
+        json={"acknowledge_warnings": True, "comment": "Approve second pack resource."},
+    )
+    assert other_approved.status_code == 200, other_approved.text
     draft_pack = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/context-packs/default/versions",
         headers=auth_headers(token),
-        json={"title": "Default pack", "description": "F MCP", "artifact_ids": [artifact_id]},
+        json={"title": "Default pack", "description": "F MCP", "artifact_ids": [artifact_id, other_artifact_id]},
     )
     assert draft_pack.status_code == 201, draft_pack.text
     published_pack = client.post(
@@ -1554,11 +1578,11 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     sources = call("sourcebrief.list_sources", {"query": "F MCP", "limit": 10})
     assert sources["sources"]
-    assert sources["sources"][0]["resource_id"] == resource_id
+    assert resource_id in {source["resource_id"] for source in sources["sources"]}
 
     discovered = call("sourcebrief.discover", {"query": "F MCP", "limit": 10, "max_resources": 10, "max_items": 10})
-    assert discovered["sources"]["sources"][0]["name"] == "F MCP Runtime bundle"
-    assert discovered["architecture"]["resources"][0]["resource_id"] == resource_id
+    assert "F MCP Runtime bundle" in {source["name"] for source in discovered["sources"]["sources"]}
+    assert resource_id in {resource["resource_id"] for resource in discovered["architecture"]["resources"]}
 
     asked = call("sourcebrief.ask", {"query": "pinned runtime evidence", "resource_ref": "F MCP Runtime", "top_k": 3})
     assert asked["citations"]
@@ -1573,6 +1597,14 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert pack["pack"]["status"] == "published"
     assert pack["freshness"]["resources"]
     assert pack["artifacts"][0]["citation_locators"]
+
+    pack_asked = call(
+        "sourcebrief.ask",
+        {"query": "runtime or other", "resource_ref": "F MCP Runtime", "context_pack_key": "default", "top_k": 10},
+    )
+    assert pack_asked["context_pack_key"] == "default"
+    assert pack_asked["citations"]
+    assert {citation["resource_id"] for citation in pack_asked["citations"]} == {resource_id}
 
     resource_map = call("sourcebrief.get_resource_map", {"resource_ref": "F MCP Runtime", "limit": 10})
     assert resource_map["artifact"]["id"] == artifact_id
@@ -1597,7 +1629,8 @@ def test_expanded_mcp_runtime_tools_f(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert malformed["result"]["structuredContent"]["status_code"] == 422
 
     architecture = call("sourcebrief.get_architecture", {"max_resources": 10, "max_items": 10})
-    assert architecture["resources"][0]["name"] == "F MCP Runtime bundle"
+    runtime_arch_resource = next(resource for resource in architecture["resources"] if resource["resource_id"] == resource_id)
+    assert runtime_arch_resource["name"] == "F MCP Runtime bundle"
     assert architecture["graphs"][0]["graph_key"] == "runtime-mcp-graph"
     assert architecture["graphs"][0]["version_hash"].startswith("sha256:")
     assert architecture["schema_hints"]["node_types"]
