@@ -1248,6 +1248,7 @@ class AgentContextCitation(BaseModel):
     commit: str | None = None
     score: float
     graph_score: float = 0.0
+    score_components: dict = Field(default_factory=dict)
 
 
 class AgentContextResponse(BaseModel):
@@ -1262,6 +1263,7 @@ class AgentContextResponse(BaseModel):
     token_budget_hint: int
     resource_coverage: list[dict] = Field(default_factory=list)
     coverage_warnings: list[str] = Field(default_factory=list)
+    retrieval_metadata: dict = Field(default_factory=dict)
     context_pack_key: str | None = None
     context_pack_version: int | None = None
     context_pack_version_id: UUID | None = None

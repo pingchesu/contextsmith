@@ -122,7 +122,10 @@ class RetrievalCandidate:
     vector_score: float = 0.0
     rerank_score: float = 0.0
     graph_score: float = 0.0
+    path_prior_score: float = 0.0
+    diversity_penalty: float = 0.0
     score: float = 0.0
+    ranking_diagnostics: dict | None = None
 
 
 def make_snippet(content: str, limit: int = 420) -> str:
@@ -130,6 +133,165 @@ def make_snippet(content: str, limit: int = 420) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[:limit].rstrip() + "…"
+
+
+INSTALL_TERMS = (
+    "install",
+    "setup",
+    "set up",
+    "setting up",
+    "quickstart",
+    "quick start",
+    "activate",
+    "activation",
+    "getting started",
+    "onboarding",
+)
+ARCHITECTURE_TERMS = ("architecture", "design", "system", "overview", "harness", "long-horizon", "long horizon")
+SKILL_TERMS = ("skill", "tool", "agent", "coding agent", "workflow")
+LOW_SIGNAL_PATH_PARTS = (
+    ".github/issue_template",
+    "issue_template",
+    "pull_request_template",
+    "todo",
+    "todos",
+    "changelog",
+    "claude.md",
+    "agents.md",
+)
+LOCALIZED_README_NAMES = ("readme_", "readme-", "readme.")
+
+
+def _normalized_path(path: str | None) -> str:
+    return (path or "").replace("\\", "/").strip().lower()
+
+
+def _path_family(path: str | None) -> str:
+    normalized = _normalized_path(path)
+    if not normalized:
+        return "unknown"
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
+        return "unknown"
+    filename = parts[-1]
+    if filename.startswith("readme"):
+        return "readme"
+    if "architecture" in filename or "architecture" in normalized:
+        return "architecture"
+    if len(parts) >= 2:
+        return "/".join(parts[:2])
+    return parts[0]
+
+
+def path_prior_score(query: str, path: str | None, title: str | None = None) -> tuple[float, list[str]]:
+    """Return a small, explainable path/type prior for retrieval quality."""
+    q = query.lower()
+    normalized = _normalized_path(path)
+    name = normalized.rsplit("/", 1)[-1]
+    title_text = (title or "").lower()
+    prior = 0.0
+    reasons: list[str] = []
+    is_install = any(term in q for term in INSTALL_TERMS)
+    is_architecture = any(term in q for term in ARCHITECTURE_TERMS)
+    is_skill = any(term in q for term in SKILL_TERMS)
+
+    if name in {"readme.md", "readme"}:
+        if is_install or is_architecture or "overview" in q:
+            prior += 0.16
+            reasons.append("primary_readme")
+        else:
+            prior += 0.06
+            reasons.append("readme")
+    elif name.startswith(LOCALIZED_README_NAMES):
+        prior -= 0.08
+        reasons.append("localized_readme_downrank")
+
+    if "quickstart" in normalized or "quick-start" in normalized or "getting-started" in normalized or "installation" in normalized:
+        if is_install:
+            prior += 0.16
+            reasons.append("install_doc")
+        else:
+            prior += 0.04
+            reasons.append("setup_doc")
+    if "architecture" in normalized or "design" in normalized:
+        if is_architecture:
+            prior += 0.18
+            reasons.append("architecture_doc")
+        else:
+            prior += 0.04
+            reasons.append("design_doc")
+    if is_skill and ("skill" in normalized or "tool" in normalized or "skill" in title_text):
+        prior += 0.08
+        reasons.append("skill_tool_doc")
+    if any(part in normalized for part in LOW_SIGNAL_PATH_PARTS):
+        prior -= 0.14
+        reasons.append("low_signal_path")
+    if normalized.endswith(('.py', '.ts', '.tsx', '.go', '.rs')) and (is_install or is_architecture):
+        prior -= 0.04
+        reasons.append("source_file_below_docs")
+    return prior, reasons
+
+
+def diversify_ranked_candidates(candidates: list[RetrievalCandidate], *, top_k: int) -> tuple[list[RetrievalCandidate], dict]:
+    """Prefer citation breadth before filling remaining slots with near-duplicates."""
+    selected: list[RetrievalCandidate] = []
+    deferred: list[tuple[RetrievalCandidate, list[str]]] = []
+    seen_hashes: set[str] = set()
+    seen_paths: set[str] = set()
+    path_family_counts: dict[str, int] = {}
+    resource_counts: dict[UUID, int] = {}
+    candidate_resources = {candidate.resource_id for candidate in candidates}
+    target_resource_count = min(len(candidate_resources), top_k) or 1
+    per_resource_soft_cap = (top_k + target_resource_count - 1) // target_resource_count
+    for candidate in candidates:
+        reasons: list[str] = []
+        path_key = _normalized_path(candidate.path)
+        family = _path_family(candidate.path)
+        if candidate.content_hash and candidate.content_hash in seen_hashes:
+            reasons.append("duplicate_content_hash")
+        if path_key and path_key in seen_paths:
+            reasons.append("duplicate_path")
+        if path_family_counts.get(family, 0) >= 2:
+            reasons.append("path_family_saturated")
+        if resource_counts.get(candidate.resource_id, 0) >= per_resource_soft_cap:
+            reasons.append("resource_saturated")
+        if reasons:
+            candidate.diversity_penalty = max(candidate.diversity_penalty, 0.05 * len(reasons))
+            deferred.append((candidate, reasons))
+            continue
+        candidate.ranking_diagnostics = {**(candidate.ranking_diagnostics or {}), "diversity": "selected"}
+        selected.append(candidate)
+        if candidate.content_hash:
+            seen_hashes.add(candidate.content_hash)
+        if path_key:
+            seen_paths.add(path_key)
+        path_family_counts[family] = path_family_counts.get(family, 0) + 1
+        resource_counts[candidate.resource_id] = resource_counts.get(candidate.resource_id, 0) + 1
+        if len(selected) >= top_k:
+            break
+    if len(selected) < top_k:
+        selected_ids = {candidate.chunk_id for candidate in selected}
+        for candidate, reasons in deferred:
+            if candidate.chunk_id in selected_ids:
+                continue
+            candidate.ranking_diagnostics = {
+                **(candidate.ranking_diagnostics or {}),
+                "diversity": "backfill",
+                "backfill_reasons": reasons,
+            }
+            selected.append(candidate)
+            selected_ids.add(candidate.chunk_id)
+            if len(selected) >= top_k:
+                break
+    unique_paths = {_normalized_path(candidate.path) for candidate in selected if candidate.path}
+    duplicate_path_count = max(0, len(selected) - len(unique_paths))
+    return selected, {
+        "candidate_pool_count": len(candidates),
+        "selected_count": len(selected),
+        "unique_citation_paths": len(unique_paths),
+        "duplicate_citation_count": duplicate_path_count,
+        "deduped_from_count": max(0, len(candidates) - len(selected)),
+    }
 
 
 def _resource_filter_clause(resource_ids: list[UUID] | None, params: dict) -> str:
@@ -242,7 +404,7 @@ def retrieve_context_candidates(
 ) -> list[RetrievalCandidate]:
     """Profile-aware lexical/vector/graph retrieval scoped to current snapshots only."""
     retrieval_profile = normalize_retrieval_profile(profile)
-    candidate_limit = max(top_k * 4, 20)
+    candidate_limit = max(top_k * 8, 40)
     base_params: dict = {
         "ws": str(workspace_id),
         "proj": str(project_id),
@@ -377,14 +539,33 @@ def retrieve_context_candidates(
         # embedding providers may legitimately return semantic-only matches.
         if require_text_overlap and candidate.lexical_score <= 0 and candidate.rerank_score <= 0 and candidate.graph_score <= 0:
             continue
-        candidate.score = (
+        candidate.path_prior_score, prior_reasons = path_prior_score(query, candidate.path, candidate.title)
+        base_score = (
             retrieval_profile.lexical_weight * candidate.lexical_score
             + retrieval_profile.vector_weight * candidate.vector_score
             + retrieval_profile.graph_weight * candidate.graph_score
             + retrieval_profile.rerank_weight * candidate.rerank_score
         )
+        candidate.score = base_score + candidate.path_prior_score
+        candidate.ranking_diagnostics = {
+            "base_score": round(base_score, 6),
+            "path_prior_score": round(candidate.path_prior_score, 6),
+            "path_prior_reasons": prior_reasons,
+            "lexical_score": round(candidate.lexical_score, 6),
+            "vector_score": round(candidate.vector_score, 6),
+            "graph_score": round(candidate.graph_score, 6),
+            "rerank_score": round(candidate.rerank_score, 6),
+        }
         filtered.append(candidate)
-    return sorted(
+    ranked = sorted(
         filtered,
         key=lambda item: (-item.score, item.resource_id, item.ordinal, item.chunk_id),
-    )[:top_k]
+    )
+    selected, diversity_metadata = diversify_ranked_candidates(ranked, top_k=top_k)
+    for candidate in selected:
+        candidate.ranking_diagnostics = {
+            **(candidate.ranking_diagnostics or {}),
+            "retrieval_diversity": diversity_metadata,
+            "final_score": round(candidate.score - candidate.diversity_penalty, 6),
+        }
+    return selected
