@@ -86,11 +86,19 @@ def _resource_ids(values: list[str] | None) -> list[str] | None:
     return values or None
 
 
-def _resource_ref(args: argparse.Namespace) -> str | None:
+def _resource_refs(args: argparse.Namespace) -> list[str] | None:
     values = getattr(args, "resource", None) or []
-    if len(values) > 1:
-        raise SourceBriefCliError("--resource accepts one unambiguous name/ref; use repeated --resource-id for multiple resources")
-    return values[0] if values else None
+    return values or None
+
+
+def _apply_resource_refs(body: dict[str, Any], args: argparse.Namespace) -> None:
+    refs = _resource_refs(args)
+    if not refs:
+        return
+    if len(refs) == 1:
+        body["resource_ref"] = refs[0]
+    else:
+        body["resource_refs"] = refs
 
 
 def _split_csv_or_repeated(values: list[str] | None) -> list[str] | None:
@@ -532,8 +540,7 @@ def cmd_resource_schedule_due(client: SourceBriefClient, args: argparse.Namespac
 def cmd_search(client: SourceBriefClient, args: argparse.Namespace) -> Any:
     _require_scope(args)
     body = {"query": args.query, "top_k": args.top_k, "resource_ids": _resource_ids(args.resource_id)}
-    if resource_ref := _resource_ref(args):
-        body["resource_ref"] = resource_ref
+    _apply_resource_refs(body, args)
     return client.request(
         "POST",
         f"/workspaces/{args.workspace_id}/projects/{args.project_id}/search",
@@ -552,8 +559,7 @@ def cmd_agent_context(client: SourceBriefClient, args: argparse.Namespace) -> An
         "include_answer": getattr(args, "include_answer", True),
         "max_chars": args.max_chars,
     }
-    if resource_ref := _resource_ref(args):
-        body["resource_ref"] = resource_ref
+    _apply_resource_refs(body, args)
     return client.request(
         "POST",
         f"/workspaces/{args.workspace_id}/projects/{args.project_id}/agent-context",
@@ -569,8 +575,7 @@ def cmd_mcp_context(client: SourceBriefClient, args: argparse.Namespace) -> Any:
         "top_k": args.top_k,
         "resource_ids": _resource_ids(args.resource_id),
     }
-    if resource_ref := _resource_ref(args):
-        arguments["resource_ref"] = resource_ref
+    _apply_resource_refs(arguments, args)
     return client.request(
         "POST",
         f"/mcp/{args.workspace_id}/{args.project_id}",
