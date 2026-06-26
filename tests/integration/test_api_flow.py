@@ -221,6 +221,101 @@ def test_agent_context_discloses_missing_requested_resource_citations() -> None:
     assert "missing_requested_resources" in " ".join(eval_coverage["coverage_warnings"])
 
 
+def test_agent_context_resource_ref_resolves_unambiguous_source_name() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id, resource_id = create_flow(client, "resource-ref")
+    run = client.post(f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/refresh", headers=headers)
+    assert run.status_code == 202, run.text
+    assert wait_for_run(client, workspace_id, run.json()["id"], headers)["status"] == "succeeded"
+
+    by_ref = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+        json={"query": "indexable marker token", "resource_ref": "Runbook", "top_k": 5, "include_code_symbols": False},
+        headers=headers,
+    )
+
+    assert by_ref.status_code == 200, by_ref.text
+    body = by_ref.json()
+    assert body["citations"]
+    assert {citation["resource_id"] for citation in body["citations"]} == {resource_id}
+
+    conflict = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+        json={"query": "indexable marker token", "resource_ids": [resource_id], "resource_ref": "Runbook"},
+        headers=headers,
+    )
+    assert conflict.status_code == 422
+
+
+
+def test_agent_context_resource_ref_fails_closed_when_ambiguous() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id, _resource_id = create_flow(client, "resource-ref-ambiguous")
+    second = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "markdown",
+            "name": "Runbook secondary ambiguous source",
+            "uri": "doc://runbook-secondary",
+            "source_config": {"content": "Second runbook body."},
+        },
+        headers=headers,
+    )
+    assert second.status_code == 201, second.text
+
+    response = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+        json={"query": "indexable marker token", "resource_ref": "Runbook", "top_k": 5, "include_code_symbols": False},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ambiguous_resource"
+
+
+
+def test_search_resource_ref_scopes_to_named_source() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id, resource_id = create_flow(client, "search-resource-ref")
+    other = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "markdown",
+            "name": "Other notes",
+            "uri": "doc://other-notes",
+            "source_config": {"content": "Runbook body with an indexable marker token."},
+        },
+        headers=headers,
+    )
+    assert other.status_code == 201, other.text
+    other_resource_id = other.json()["id"]
+    for rid in (resource_id, other_resource_id):
+        run = client.post(f"/workspaces/{workspace_id}/projects/{project_id}/resources/{rid}/refresh", headers=headers)
+        assert run.status_code == 202, run.text
+        assert wait_for_run(client, workspace_id, run.json()["id"], headers)["status"] == "succeeded"
+
+    response = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/search",
+        json={"query": "indexable marker token", "resource_ref": "Runbook", "top_k": 10},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["hits"]
+    assert {hit["resource_id"] for hit in body["hits"]} == {resource_id}
+
+    conflict = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/search",
+        json={"query": "indexable marker token", "resource_ids": [resource_id], "resource_ref": "Runbook"},
+        headers=headers,
+    )
+    assert conflict.status_code == 422
+
+
 def test_agent_context_sanitizes_latest_index_failure_for_query_only_tokens() -> None:
     require_real_services()
     client = TestClient(app)

@@ -73,7 +73,72 @@ This starts:
 
 The API container runs migrations automatically in Compose through `SOURCEBRIEF_AUTO_MIGRATE=true`.
 
-## 3. Open the web console
+## 3. CLI first useful moment
+
+For a local CLI demo, enable dev header auth before startup. The default keeps this off because shared deployments should use bearer tokens instead:
+
+```env
+SOURCEBRIEF_DEV_AUTH=true
+```
+
+If you changed `.env` after starting the stack, restart it:
+
+```bash
+make compose-down
+make compose-up
+until curl -fsS http://localhost:18000/readyz; do sleep 2; done
+```
+
+Then run the deterministic CLI demo. It creates an isolated workspace/project, adds a tiny runbook, indexes it, saves workspace/project defaults locally, and ends with a cited human answer:
+
+```bash
+make venv
+export PATH="$PWD/.venv/bin:$PATH"
+export SOURCEBRIEF_API_URL=http://localhost:18000
+export SOURCEBRIEF_EMAIL=demo@example.com
+
+sourcebrief quickstart-demo
+```
+
+Expected shape:
+
+```text
+Quickstart demo: indexed and ready for retrieval
+  workspace: SourceBrief CLI Demo
+  project: First useful moment
+  resource: Payment retry runbook
+  saved_defaults: .../sourcebrief/config.json
+  index_status: succeeded
+Answer: Retry payment jobs with exponential backoff. Escalate after three failures.
+Citations:
+- [1] runbooks/payment-retry.md score=...
+Next:
+- sourcebrief ask --resource "Payment retry runbook" "What should an operator do when payment retries fail?"
+- Delete the demo workspace from the web console when finished, or keep it for CLI experiments.
+```
+
+After the demo, ask follow-up questions without copying workspace/project UUIDs:
+
+```bash
+sourcebrief ask --resource "Payment retry runbook" "what should an operator do when payment retries fail?"
+```
+
+`sourcebrief ask` prints a concise cited answer by default. Use either `sourcebrief --json ask ...` or `sourcebrief ask --json ...` when you need the full agent-context packet for runtime debugging or automation.
+
+Optional MCP smoke:
+
+```bash
+sourcebrief quickstart-demo --validate-mcp
+```
+
+For shared or production-like deployments, do not use dev auth. Export a scoped bearer token instead:
+
+```bash
+export SOURCEBRIEF_TOKEN=<scoped-token>
+sourcebrief quickstart-demo
+```
+
+## 4. Open the web console
 
 Open:
 
@@ -90,9 +155,9 @@ SOURCEBRIEF_ADMIN_PASSWORD
 
 You should land in the SourceBrief console with a default workspace and project.
 
-## 4. Add your first source
+## 5. Add your first source in the UI
 
-Use the UI first; it is the clearest product path.
+Use the UI when you want to inspect navigation, source status, and citations visually.
 
 1. Open **Sources**.
 2. Add a small Git repo, Markdown document, URL, upload, or zip folder bundle.
@@ -112,40 +177,11 @@ Real repos may exceed the default import budgets for chunks or code symbols. Sou
 - Limited/fallback imports are marked **partial**; generated context packets include coverage warnings so agents do not over-trust a subset corpus.
 - If a repo is too broad, retry with a smaller `max_repo_files` / `max_repo_bytes`, a docs-only or source-subpath import, include/exclude filters, or an intentional higher budget.
 
-## 5. CLI experiments
+### Advanced raw packet proof
 
-The CLI exists for local automation and agent integration tests. It supports two auth modes:
-
-- bearer token: `SOURCEBRIEF_TOKEN` or `--token`
-- local development header auth: `SOURCEBRIEF_DEV_AUTH=true` plus `SOURCEBRIEF_EMAIL`
-
-The default `.env.example` has `SOURCEBRIEF_DEV_AUTH=false`, so this local demo requires opting in before startup:
-
-```env
-SOURCEBRIEF_DEV_AUTH=true
-```
-
-Then restart the stack and run:
+Use this when validating the agent runtime contract rather than the human first-use flow:
 
 ```bash
-make compose-up
-make venv
-export PATH="$PWD/.venv/bin:$PATH"
-export SOURCEBRIEF_API_URL=http://localhost:18000
-export SOURCEBRIEF_EMAIL=demo@example.com
-
-sourcebrief health
-sourcebrief --help
-```
-
-Create a workspace/project and import a public repo:
-
-```bash
-WORKSPACE_ID=$(sourcebrief --json workspace create --name Demo --slug "demo-$(date +%s)" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-PROJECT_ID=$(sourcebrief --json project create --workspace-id "$WORKSPACE_ID" --name "Demo Project" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-RESOURCE_JSON=$(sourcebrief --json resource add-repo --workspace-id "$WORKSPACE_ID" --project-id "$PROJECT_ID" --name SourceBrief --repo-url https://github.com/pingchesu/sourcebrief.git --branch main --refresh --wait)
-RESOURCE_ID=$(printf '%s' "$RESOURCE_JSON" | python -c 'import json,sys; print(json.load(sys.stdin)["resource"]["id"])')
-
 sourcebrief agent-context \
   --workspace-id "$WORKSPACE_ID" \
   --project-id "$PROJECT_ID" \
@@ -153,8 +189,6 @@ sourcebrief agent-context \
   --runtime hermes \
   --query "how does SourceBrief expose agent context?"
 ```
-
-For shared or production-like deployments, do not use dev auth. Use a scoped API token instead.
 
 ## Full verification
 
