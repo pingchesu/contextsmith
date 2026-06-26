@@ -362,6 +362,17 @@ def test_cli_selected_defaults_apply_to_search_and_resource_list(monkeypatch, ca
     assert search_call[2] == {"query": "demo", "top_k": 10, "resource_ids": None, "resource_ref": "Runbook"}
     capsys.readouterr()
 
+    assert cli_main(["--json", "search", "--query", "compare", "--resource", "Runbook", "--resource", "Comparison notes", "--resource-id", "res-explicit"]) == 0
+    multi_search_call = FakeClient.instances[-1].calls[0]
+    assert multi_search_call[2] == {"query": "compare", "top_k": 10, "resource_ids": ["res-explicit"], "resource_refs": ["Runbook", "Comparison notes"]}
+    capsys.readouterr()
+
+    assert cli_main(["--json", "mcp-context", "--query", "compare", "--resource", "Runbook", "--resource", "Comparison notes"]) == 0
+    mcp_call = FakeClient.instances[-1].calls[0]
+    assert mcp_call[2] is not None
+    assert mcp_call[2]["params"]["arguments"]["resource_refs"] == ["Runbook", "Comparison notes"]
+    capsys.readouterr()
+
     assert cli_main(["--json", "resource", "list"]) == 0
     assert FakeClient.instances[-1].calls[0][0:2] == ("GET", "/workspaces/ws-1/projects/proj-1/resources")
     capsys.readouterr()

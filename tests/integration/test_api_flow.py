@@ -287,12 +287,52 @@ def test_agent_context_resource_ref_resolves_unambiguous_source_name() -> None:
     assert body["citations"]
     assert {citation["resource_id"] for citation in body["citations"]} == {resource_id}
 
-    conflict = client.post(
+    mixed_duplicate = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
         json={"query": "indexable marker token", "resource_ids": [resource_id], "resource_ref": "Runbook"},
         headers=headers,
     )
-    assert conflict.status_code == 422
+    assert mixed_duplicate.status_code == 200, mixed_duplicate.text
+    assert {citation["resource_id"] for citation in mixed_duplicate.json()["citations"]} == {resource_id}
+
+
+
+def test_agent_context_resource_refs_support_multi_repo_comparison_and_mixed_ids() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id, resource_id = create_flow(client, "resource-refs")
+    other = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "markdown",
+            "name": "Comparison notes",
+            "uri": "doc://comparison-notes",
+            "source_config": {"content": "Comparison marker token explains the second repository behavior."},
+        },
+        headers=headers,
+    )
+    assert other.status_code == 201, other.text
+    other_resource_id = other.json()["id"]
+    for rid in (resource_id, other_resource_id):
+        run = client.post(f"/workspaces/{workspace_id}/projects/{project_id}/resources/{rid}/refresh", headers=headers)
+        assert run.status_code == 202, run.text
+        assert wait_for_run(client, workspace_id, run.json()["id"], headers)["status"] == "succeeded"
+
+    by_refs = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+        json={"query": "marker token", "resource_refs": ["Runbook", "Comparison notes"], "top_k": 10, "include_code_symbols": False},
+        headers=headers,
+    )
+    assert by_refs.status_code == 200, by_refs.text
+    assert {citation["resource_id"] for citation in by_refs.json()["citations"]} == {resource_id, other_resource_id}
+
+    mixed = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+        json={"query": "marker token", "resource_ids": [resource_id], "resource_refs": ["Comparison notes"], "top_k": 10, "include_code_symbols": False},
+        headers=headers,
+    )
+    assert mixed.status_code == 200, mixed.text
+    assert {entry["resource_id"] for entry in mixed.json()["resource_coverage"]} == {resource_id, other_resource_id}
 
 
 
@@ -314,7 +354,7 @@ def test_agent_context_resource_ref_fails_closed_when_ambiguous() -> None:
 
     response = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
-        json={"query": "indexable marker token", "resource_ref": "Runbook", "top_k": 5, "include_code_symbols": False},
+        json={"query": "indexable marker token", "resource_refs": ["Runbook"], "top_k": 5, "include_code_symbols": False},
         headers=headers,
     )
 
@@ -355,12 +395,13 @@ def test_search_resource_ref_scopes_to_named_source() -> None:
     assert body["hits"]
     assert {hit["resource_id"] for hit in body["hits"]} == {resource_id}
 
-    conflict = client.post(
+    mixed = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/search",
-        json={"query": "indexable marker token", "resource_ids": [resource_id], "resource_ref": "Runbook"},
+        json={"query": "indexable marker token", "resource_ids": [resource_id], "resource_refs": ["Other notes"], "top_k": 10},
         headers=headers,
     )
-    assert conflict.status_code == 422
+    assert mixed.status_code == 200, mixed.text
+    assert {hit["resource_id"] for hit in mixed.json()["hits"]} == {resource_id, other_resource_id}
 
 
 def test_agent_context_sanitizes_latest_index_failure_for_query_only_tokens() -> None:

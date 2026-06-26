@@ -589,8 +589,11 @@ def collect_agent_contexts(client: ApiClient, workspace_id: str, project_id: str
             "include_code_symbols": question.get("include_code_symbols", True),
             "max_chars": question.get("max_chars", 8000),
         }
-        if len(resource_refs) == 1:
-            payload["resource_ref"] = resource_refs[0]
+        if resource_refs:
+            if len(resource_refs) == 1:
+                payload["resource_ref"] = resource_refs[0]
+            else:
+                payload["resource_refs"] = list(resource_refs)
         else:
             payload["resource_ids"] = question.get("resource_ids") or None
         try:

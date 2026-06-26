@@ -6224,17 +6224,7 @@ def search_project(
 ) -> SearchResponse:
     require_scope(principal, "project:query")
     _require_project_access(session, workspace_id, project_id, principal)
-    if payload.resource_ref:
-        if payload.resource_ids:
-            raise HTTPException(status_code=422, detail={"code": "conflicting_resource_locator", "message": "use resource_ids or resource_ref, not both"})
-        resource = _runtime_resolve_resource_ref(
-            session,
-            workspace_id,
-            project_id,
-            principal,
-            {"resource_ref": payload.resource_ref},
-        )
-        payload = payload.model_copy(update={"resource_ids": [resource.id], "resource_ref": None})
+    payload = _request_with_resource_refs(session, workspace_id, project_id, principal, payload)  # type: ignore[assignment]
     resource_ids = _effective_resource_ids(principal, payload.resource_ids)
 
     resource_clause = ""
@@ -7483,18 +7473,7 @@ def _agent_context_with_resource_ref(
     principal: Principal,
     payload: AgentContextRequest,
 ) -> AgentContextRequest:
-    if not payload.resource_ref:
-        return payload
-    if payload.resource_ids:
-        raise HTTPException(status_code=422, detail={"code": "conflicting_resource_locator", "message": "use resource_ids or resource_ref, not both"})
-    resource = _runtime_resolve_resource_ref(
-        session,
-        workspace_id,
-        project_id,
-        principal,
-        {"resource_ref": payload.resource_ref},
-    )
-    return payload.model_copy(update={"resource_ids": [resource.id], "resource_ref": None})
+    return cast(AgentContextRequest, _request_with_resource_refs(session, workspace_id, project_id, principal, payload))
 
 
 def _build_pack_agent_context_response(
@@ -8497,6 +8476,56 @@ def _runtime_require_pack_covers_locator(session: Session, workspace_id: UUID, p
         raise HTTPException(status_code=404, detail={"code": "section_not_found", "message": "section not found in context pack"})
 
 
+def _resource_ref_values(resource_ref: Any = None, resource_refs: Any = None) -> list[str]:
+    values: list[str] = []
+    if resource_ref is not None and str(resource_ref).strip():
+        values.append(str(resource_ref).strip())
+    if resource_refs:
+        if not isinstance(resource_refs, list):
+            raise HTTPException(status_code=422, detail={"code": "invalid_resource_refs", "message": "resource_refs must be an array of names/refs"})
+        values.extend(str(ref).strip() for ref in resource_refs if str(ref).strip())
+    return list(dict.fromkeys(values))
+
+
+def _dedupe_uuid_values(values: list[Any]) -> list[UUID]:
+    result: list[UUID] = []
+    seen: set[UUID] = set()
+    for value in values:
+        item = value if isinstance(value, UUID) else UUID(str(value))
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _resolve_resource_ref_ids(session: Session, workspace_id: UUID, project_id: UUID, principal: Principal, *, resource_ref: Any = None, resource_refs: Any = None) -> list[UUID]:
+    ids: list[UUID] = []
+    for ref in _resource_ref_values(resource_ref, resource_refs):
+        ids.append(_runtime_resolve_resource_ref(session, workspace_id, project_id, principal, {"resource_ref": ref}).id)
+    return _dedupe_uuid_values(ids)
+
+
+def _request_with_resource_refs(
+    session: Session,
+    workspace_id: UUID,
+    project_id: UUID,
+    principal: Principal,
+    payload: SearchRequest | AgentContextRequest,
+) -> SearchRequest | AgentContextRequest:
+    ref_ids = _resolve_resource_ref_ids(
+        session,
+        workspace_id,
+        project_id,
+        principal,
+        resource_ref=payload.resource_ref,
+        resource_refs=payload.resource_refs,
+    )
+    if not ref_ids:
+        return payload
+    resource_ids = _dedupe_uuid_values([*(payload.resource_ids or []), *ref_ids])
+    return payload.model_copy(update={"resource_ids": resource_ids, "resource_ref": None, "resource_refs": None})
+
+
 def _runtime_resolve_resource_ref(session: Session, workspace_id: UUID, project_id: UUID, principal: Principal, args: dict[str, Any]) -> Resource:
     resource_id = args.get("resource_id")
     artifact_id = args.get("artifact_id")
@@ -8544,23 +8573,26 @@ def _runtime_args_with_resource_ref(
     *,
     single: bool,
 ) -> dict[str, Any]:
-    ref = args.get("resource_ref")
-    if not ref:
+    refs = _resource_ref_values(args.get("resource_ref"), args.get("resource_refs"))
+    if not refs:
         return args
     if single:
+        if len(refs) > 1:
+            raise HTTPException(status_code=422, detail={"code": "too_many_resource_refs", "message": "this tool accepts one resource_ref"})
         if args.get("resource_id"):
             raise HTTPException(status_code=422, detail={"code": "conflicting_resource_locator", "message": "use resource_id or resource_ref, not both"})
-        resource = _runtime_resolve_resource_ref(session, workspace_id, project_id, principal, {"resource_ref": ref})
+        resource = _runtime_resolve_resource_ref(session, workspace_id, project_id, principal, {"resource_ref": refs[0]})
         updated = dict(args)
         updated.pop("resource_ref", None)
+        updated.pop("resource_refs", None)
         updated["resource_id"] = str(resource.id)
         return updated
-    if args.get("resource_ids"):
-        raise HTTPException(status_code=422, detail={"code": "conflicting_resource_locator", "message": "use resource_ids or resource_ref, not both"})
-    resource = _runtime_resolve_resource_ref(session, workspace_id, project_id, principal, {"resource_ref": ref})
+    ref_ids = _resolve_resource_ref_ids(session, workspace_id, project_id, principal, resource_refs=refs)
+    current_ids = list(args.get("resource_ids") or [])
     updated = dict(args)
     updated.pop("resource_ref", None)
-    updated["resource_ids"] = [str(resource.id)]
+    updated.pop("resource_refs", None)
+    updated["resource_ids"] = [str(item) for item in _dedupe_uuid_values([*current_ids, *ref_ids])]
     return updated
 
 
@@ -9260,7 +9292,7 @@ def _mcp_tools() -> list[dict[str, Any]]:
                     "profile": {"type": "string", "enum": sorted(RETRIEVAL_PROFILES)},
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 50},
                     "resource_ids": {"type": "array", "items": {"type": "string"}},
-                    "resource_ref": {"type": "string"},
+                    "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}},
                     "context_pack_key": {"type": "string"},
                     "context_pack_version": {"type": "integer", "minimum": 1},
                     "max_chars": {"type": "integer", "minimum": 1000, "maximum": 50000},
@@ -9278,7 +9310,7 @@ def _mcp_tools() -> list[dict[str, Any]]:
         {
             "name": "sourcebrief.lookup",
             "description": "Golden-path lookup router for docs, code, grep, and symbols; accepts optional human resource_ref for unambiguous source selection.",
-            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "search_in": {"type": "string", "enum": ["all", "docs", "code", "grep", "symbols"]}, "resource_ref": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "top_k": {"type": "integer", "minimum": 1, "maximum": 50}, "path_glob": {"type": "string"}, "regex": {"type": "boolean"}}, "required": ["query"]},
+            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "search_in": {"type": "string", "enum": ["all", "docs", "code", "grep", "symbols"]}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "top_k": {"type": "integer", "minimum": 1, "maximum": 50}, "path_glob": {"type": "string"}, "regex": {"type": "boolean"}}, "required": ["query"]},
         },
         {
             "name": "sourcebrief.get_context_pack",
@@ -9293,17 +9325,17 @@ def _mcp_tools() -> list[dict[str, Any]]:
         {
             "name": "sourcebrief.get_resource_map",
             "description": "Fetch an approved resource-map artifact by resource id, human resource reference, or artifact id with canonical read_section locators.",
-            "inputSchema": {"type": "object", "properties": {"resource_id": {"type": "string"}, "resource_ref": {"type": "string"}, "artifact_id": {"type": "string"}, "source_snapshot_id": {"type": "string"}, "include_sources": {"type": "boolean"}, "include_citations": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "cursor": {"type": "string"}}},
+            "inputSchema": {"type": "object", "properties": {"resource_id": {"type": "string"}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "artifact_id": {"type": "string"}, "source_snapshot_id": {"type": "string"}, "include_sources": {"type": "boolean"}, "include_citations": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "cursor": {"type": "string"}}},
         },
         {
             "name": "sourcebrief.search",
             "description": "Search indexed sections/artifacts with cited canonical locators for read_section.",
-            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "context_pack_key": {"type": "string"}, "context_pack_version": {"type": "integer", "minimum": 1}, "profile": {"type": "string", "enum": sorted(RETRIEVAL_PROFILES)}, "top_k": {"type": "integer", "minimum": 1, "maximum": 50}, "include_code_symbols": {"type": "boolean"}}, "required": ["query"]},
+            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "context_pack_key": {"type": "string"}, "context_pack_version": {"type": "integer", "minimum": 1}, "profile": {"type": "string", "enum": sorted(RETRIEVAL_PROFILES)}, "top_k": {"type": "integer", "minimum": 1, "maximum": 50}, "include_code_symbols": {"type": "boolean"}}, "required": ["query"]},
         },
         {
             "name": "sourcebrief.read_section",
             "description": "Read exact retained section evidence from a canonical locator returned by search/resource-map/context-pack tools.",
-            "inputSchema": {"type": "object", "properties": {"resource_id": {"type": "string"}, "resource_ref": {"type": "string"}, "source_snapshot_id": {"type": "string"}, "snapshot_section_id": {"type": "string"}, "context_artifact_id": {"type": "string"}, "context_artifact_citation_id": {"type": "string"}, "context_pack_key": {"type": "string"}, "context_pack_version": {"type": "integer"}, "path": {"type": "string"}, "heading": {"type": "string"}, "content_hash": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}, "allow_current_fallback": {"type": "boolean"}}, "allOf": [{"anyOf": [{"required": ["resource_id"]}, {"required": ["resource_ref"]}]}, {"anyOf": [{"required": ["context_artifact_citation_id"]}, {"required": ["snapshot_section_id", "source_snapshot_id"]}, {"required": ["source_snapshot_id", "path", "content_hash"]}]}]},
+            "inputSchema": {"type": "object", "properties": {"resource_id": {"type": "string"}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "source_snapshot_id": {"type": "string"}, "snapshot_section_id": {"type": "string"}, "context_artifact_id": {"type": "string"}, "context_artifact_citation_id": {"type": "string"}, "context_pack_key": {"type": "string"}, "context_pack_version": {"type": "integer"}, "path": {"type": "string"}, "heading": {"type": "string"}, "content_hash": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}, "allow_current_fallback": {"type": "boolean"}}, "allOf": [{"anyOf": [{"required": ["resource_id"]}, {"required": ["resource_ref"]}]}, {"anyOf": [{"required": ["context_artifact_citation_id"]}, {"required": ["snapshot_section_id", "source_snapshot_id"]}, {"required": ["source_snapshot_id", "path", "content_hash"]}]}]},
         },
         {
             "name": "sourcebrief.get_architecture",
@@ -9336,7 +9368,7 @@ def _mcp_tools() -> list[dict[str, Any]]:
                     "profile": {"type": "string", "enum": sorted(RETRIEVAL_PROFILES)},
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 50},
                     "resource_ids": {"type": "array", "items": {"type": "string"}},
-                    "resource_ref": {"type": "string"},
+                    "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}},
                     "context_pack_key": {"type": "string"},
                     "context_pack_version": {"type": "integer", "minimum": 1},
                     "max_chars": {"type": "integer", "minimum": 1000, "maximum": 50000},
@@ -9349,22 +9381,22 @@ def _mcp_tools() -> list[dict[str, Any]]:
         {
             "name": "sourcebrief.search_code",
             "description": "Search indexed snapshot files without local repository access.",
-            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "top_k": {"type": "integer", "minimum": 1, "maximum": 50}}, "required": ["query"]},
+            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "top_k": {"type": "integer", "minimum": 1, "maximum": 50}}, "required": ["query"]},
         },
         {
             "name": "sourcebrief.grep_code",
             "description": "Run bounded grep over indexed snapshot files without local repository access.",
-            "inputSchema": {"type": "object", "properties": {"pattern": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "path_glob": {"type": "string"}, "max_matches": {"type": "integer", "minimum": 1, "maximum": 100}, "regex": {"type": "boolean"}}, "required": ["pattern"]},
+            "inputSchema": {"type": "object", "properties": {"pattern": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "path_glob": {"type": "string"}, "max_matches": {"type": "integer", "minimum": 1, "maximum": 100}, "regex": {"type": "boolean"}}, "required": ["pattern"]},
         },
         {
             "name": "sourcebrief.read_file",
             "description": "Read a line range from an indexed repo-relative file snapshot.",
-            "inputSchema": {"type": "object", "properties": {"resource_id": {"type": "string"}, "resource_ref": {"type": "string"}, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"], "anyOf": [{"required": ["resource_id"]}, {"required": ["resource_ref"]}]},
+            "inputSchema": {"type": "object", "properties": {"resource_id": {"type": "string"}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"], "anyOf": [{"required": ["resource_id"]}, {"required": ["resource_ref"]}]},
         },
         {
             "name": "sourcebrief.find_symbol",
             "description": "Find indexed code symbols by name and optional kind.",
-            "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "kind": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "top_k": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]},
+            "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "kind": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "string"}}, "resource_ref": {"type": "string"}, "resource_refs": {"type": "array", "items": {"type": "string"}}, "top_k": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]},
         },
         {
             "name": "sourcebrief.generate_patch",
