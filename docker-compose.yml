@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sourcebrief}
       POSTGRES_DB: ${POSTGRES_DB:-sourcebrief}
     ports:
-    - ${SOURCEBRIEF_POSTGRES_PORT:-${CONTEXTSMITH_POSTGRES_PORT:-55432}}:5432
+    - 127.0.0.1:${SOURCEBRIEF_POSTGRES_PORT:-${CONTEXTSMITH_POSTGRES_PORT:-55432}}:5432
     healthcheck:
       test:
       - CMD-SHELL
@@ -19,7 +19,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-    - ${SOURCEBRIEF_REDIS_PORT:-${CONTEXTSMITH_REDIS_PORT:-6380}}:6379
+    - 127.0.0.1:${SOURCEBRIEF_REDIS_PORT:-${CONTEXTSMITH_REDIS_PORT:-6380}}:6379
     healthcheck:
       test:
       - CMD

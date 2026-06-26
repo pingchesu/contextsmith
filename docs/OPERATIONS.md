@@ -30,6 +30,17 @@ docker compose down --remove-orphans --volumes
 - Set `SOURCEBRIEF_DATABASE_URL` only when intentionally pointing API/workers at a non-compose database.
 - `NEXT_PUBLIC_API_BASE_URL` is baked into the Next.js client at build time. After changing it, run `docker compose up -d --build`.
 - If `SOURCEBRIEF_WEB_PORT` changes, update `SOURCEBRIEF_CORS_ORIGINS` to include the browser origin, for example `http://localhost:13100,http://127.0.0.1:13100`.
+- The default Compose file publishes Postgres and Redis to `127.0.0.1` only. On remote or shared hosts, keep those internal data services loopback-bound unless you intentionally add a local Compose override and matching firewall policy for development access.
+
+## Remote/self-host port exposure
+
+The alpha stack intentionally separates browser/API exposure from data-service exposure:
+
+- API and web ports may be reachable from other machines when the host firewall and Docker networking allow it.
+- Postgres and Redis are internal services for the API/workers and bind to loopback by default.
+- For remote/self-host evaluation, expose only the API/web ports you need and keep DB/Redis off the LAN/public interface.
+- If you need host-side database inspection, connect from the Docker host via `localhost:${SOURCEBRIEF_POSTGRES_PORT:-55432}` or run `docker compose exec -T postgres ...`.
+- If you intentionally need remote DB/Redis access in a disposable development environment, add an explicit untracked override such as `docker-compose.override.yml`; do not rely on the shared default compose file to expose those services.
 
 ## Health checks
 
