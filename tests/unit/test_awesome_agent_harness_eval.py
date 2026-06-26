@@ -115,6 +115,7 @@ def test_grade_report_accepts_structured_synthesized_answer() -> None:
     assert report["grade_counts"] == {"PASS": 2, "PARTIAL": 0, "FAIL": 0}
     assert report["aggregate"]["human_answer_demo_pass_rate"] == 1.0
     assert report["aggregate"]["abstention_pass_rate"] == 1.0
+    assert report["aggregate"]["partial_corpus_risk_count"] == 0
 
 
 def test_grade_report_separates_failed_negative_abstention() -> None:
@@ -192,3 +193,46 @@ def test_grade_report_keeps_context_only_response_partial() -> None:
 
     assert report["results"][0]["checks"]["human_answer_demo"] == "partial"
     assert "not a synthesized human answer" in report["results"][0]["quality_notes"][0]
+
+
+def test_grade_report_counts_partial_corpus_risk_separately() -> None:
+    module = load_eval_module()
+    manifest = manifest_with_question(
+        {
+            "id": "limited-answer",
+            "query": "What does the runbook say?",
+            "category": "runbook",
+            "customer_job": "understand runbook",
+            "difficulty": "medium",
+            "demo_type": "human-answer-demo",
+            "target_repo": "demo",
+            "target_repos": ["demo"],
+            "expected_result": "pass",
+            "min_citations": 1,
+            "import_type": "limited",
+        }
+    )
+    report = module.build_grade_report(
+        manifest,
+        [
+            {
+                "results": [
+                    {"id": "limited-answer", "citation_count": 1, "context_chars": 240, "failure_reasons": []},
+                    negative_eval_response(),
+                ]
+            }
+        ],
+        {
+            "limited-answer": {
+                "answer": {"text": "Based on cited context: retry with exponential backoff. [1]"},
+                "citations": [{"path": "runbook.md"}],
+                "context": "x" * 240,
+            },
+            "negative-control": negative_context(),
+        },
+    )
+
+    limited_result = next(result for result in report["results"] if result["id"] == "limited-answer")
+    assert limited_result["checks"]["partial_corpus_caveat"] == "partial"
+    assert limited_result["checks"]["retrieval_quality"] is True
+    assert report["aggregate"]["partial_corpus_risk_count"] == 1

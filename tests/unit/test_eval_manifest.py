@@ -145,6 +145,7 @@ def test_eval_report_aggregate_must_match_per_result_grades_and_checks() -> None
         "abstention_pass_rate": 1.0,
         "wrong_repo_failures": 0,
         "unsupported_claim_failures": 0,
+        "partial_corpus_risk_count": 0,
         "verdict": "PASS",
     }
 
@@ -159,6 +160,14 @@ def test_eval_report_failed_abstention_blocks_pass_verdict() -> None:
         result["checks"]["abstained_correctly"] = False if result["id"] == "negative-compliance-001" else "not_applicable"
 
     with pytest.raises(EvalManifestError, match="verdict"):
+        validate_grade_report(report)
+
+
+def test_eval_report_partial_corpus_risk_count_must_match_checks() -> None:
+    report = load_json_file(SAMPLE_REPORT)
+    report["results"][0]["checks"]["partial_corpus_caveat"] = "partial"
+
+    with pytest.raises(EvalManifestError, match="partial_corpus_risk_count"):
         validate_grade_report(report)
 
 

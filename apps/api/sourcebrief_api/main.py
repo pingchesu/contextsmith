@@ -7358,8 +7358,23 @@ def _runtime_safe_index_failure(error_message: str | None) -> str:
     return "latest index failed; inspect Index activity with read scope for details"
 
 
+def _coverage_budget_reason(read: ResourceRead) -> str | None:
+    diagnostics = read.index_diagnostics or {}
+    configured_budgets = diagnostics.get("configured_budgets") or {}
+    limited_keys = diagnostics.get("limited_budget_keys") or [key for key in configured_budgets if configured_budgets.get(key) is not None]
+    if read.coverage_status != "partial":
+        return None
+    if limited_keys:
+        details = ", ".join(f"{key}={configured_budgets.get(key)}" for key in limited_keys if configured_budgets.get(key) is not None)
+        return f"limited import budget ({details})" if details else "limited import budget"
+    if diagnostics.get("file_budget_stats"):
+        return "current snapshot was truncated by file/byte import budgets"
+    return "partial corpus; evidence may be incomplete"
+
+
 def _resource_coverage_entry(session: Session, resource: Resource) -> dict[str, Any]:
     read = _resource_read(session, resource)
+    diagnostics = read.index_diagnostics or {}
     last_index = session.scalar(
         select(IndexRun)
         .where(
@@ -7378,7 +7393,11 @@ def _resource_coverage_entry(session: Session, resource: Resource) -> dict[str, 
         "coverage_warnings": read.coverage_warnings,
         "current_snapshot_id": str(resource.current_snapshot_id) if resource.current_snapshot_id else None,
         "retrieval_enabled": resource.retrieval_enabled,
-        "configured_budgets": read.index_diagnostics.get("configured_budgets", {}),
+        "configured_budgets": diagnostics.get("configured_budgets", {}),
+        "limited_budget_keys": diagnostics.get("limited_budget_keys", []),
+        "budget_reason": _coverage_budget_reason(read),
+        "suggested_retry": diagnostics.get("suggested_retry"),
+        "file_budget_stats": diagnostics.get("file_budget_stats", {}),
     }
     if last_index is not None:
         safe_failure = _runtime_safe_index_failure(last_index.error_message) if last_index.status == "failed" else None

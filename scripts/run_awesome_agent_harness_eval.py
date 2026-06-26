@@ -690,6 +690,7 @@ def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, 
         return round(sum(1 for value in applicable if value is True or value == "pass") / len(applicable), 6) if applicable else 1.0
     wrong_repo_failures = sum(1 for result in results if result["checks"]["wrong_repo_check"] == "fail")
     unsupported_claim_failures = sum(1 for result in results if result["checks"]["citation_support"] == "fail")
+    partial_corpus_risk_count = sum(1 for result in results if result["checks"]["partial_corpus_caveat"] == "partial")
     verdict = "PASS"
     if grade_counts["FAIL"] or wrong_repo_failures or unsupported_claim_failures:
         verdict = "BLOCK"
@@ -706,6 +707,7 @@ def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, 
             "abstention_pass_rate": rate("abstained_correctly"),
             "wrong_repo_failures": wrong_repo_failures,
             "unsupported_claim_failures": unsupported_claim_failures,
+            "partial_corpus_risk_count": partial_corpus_risk_count,
             "verdict": verdict,
         },
         "grade_counts": grade_counts,
