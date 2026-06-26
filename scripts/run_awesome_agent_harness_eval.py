@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import UTC, datetime
@@ -103,10 +104,10 @@ def load_dotenv(path: Path) -> dict[str, str]:
 
 def first_config_value(dotenv: dict[str, str], *names: str, default: str | None = None) -> str | None:
     for name in names:
-        if os.getenv(name):
-            return os.getenv(name)
         if dotenv.get(name):
             return dotenv[name]
+        if os.getenv(name):
+            return os.getenv(name)
     return default
 
 
@@ -128,6 +129,82 @@ def authenticate(client: ApiClient, out_dir: Path) -> None:
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(redact(data), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def run_local_command(command: list[str], *, timeout: int = 60) -> dict[str, Any]:
+    started_at = datetime.now(UTC).isoformat()
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "command": command,
+            "exit_code": proc.returncode,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "started_at": started_at,
+            "finished_at": datetime.now(UTC).isoformat(),
+        }
+    except Exception as exc:  # noqa: BLE001 - evidence should preserve command capture failures
+        return {
+            "command": command,
+            "exit_code": None,
+            "error": str(exc),
+            "started_at": started_at,
+            "finished_at": datetime.now(UTC).isoformat(),
+        }
+
+
+def http_check(url: str, *, timeout: int = 30) -> dict[str, Any]:
+    started_at = datetime.now(UTC).isoformat()
+    try:
+        with urlopen(url, timeout=timeout) as response:  # noqa: S310 - operator-provided local URL
+            raw = response.read().decode("utf-8", errors="replace")
+            try:
+                body: Any = json.loads(raw) if raw else None
+            except json.JSONDecodeError:
+                body = raw[:2000]
+            return {
+                "url": url,
+                "status_code": response.status,
+                "ok": 200 <= response.status < 300,
+                "body": body,
+                "started_at": started_at,
+                "finished_at": datetime.now(UTC).isoformat(),
+            }
+    except Exception as exc:  # noqa: BLE001 - evidence should preserve exact health failure
+        return {"url": url, "ok": False, "error": str(exc), "started_at": started_at, "finished_at": datetime.now(UTC).isoformat()}
+
+
+def capture_run_environment(out_dir: Path, *, api_url: str, web_url: str | None, argv: list[str]) -> dict[str, Any]:
+    dotenv = load_dotenv(REPO_ROOT / ".env")
+    compose_project = first_config_value(dotenv, "COMPOSE_PROJECT_NAME", "SOURCEBRIEF_COMPOSE_PROJECT", default=REPO_ROOT.name)
+    data = {
+        "captured_at": datetime.now(UTC).isoformat(),
+        "operator_command": {"argv": argv, "exit_code": 0, "exit_code_note": "written after successful runner completion"},
+        "configured_urls": {"api_url": api_url, "web_url": web_url},
+        "compose_project": compose_project,
+        "commands": {
+            "git_head": run_local_command(["git", "rev-parse", "HEAD"]),
+            "git_branch": run_local_command(["git", "branch", "--show-current"]),
+            "git_status_short": run_local_command(["git", "status", "--short", "--branch"]),
+            "print_api_url": run_local_command(["make", "-s", "print-api-url"]),
+            "print_web_url": run_local_command(["make", "-s", "print-web-url"]),
+            "compose_config_services": run_local_command(["docker", "compose", "config", "--services"], timeout=120),
+        },
+        "health": {
+            "api_readyz": http_check(f"{api_url.rstrip('/')}/readyz"),
+            "api_provider_health": http_check(f"{api_url.rstrip('/')}/provider-health"),
+            "web_health": http_check(f"{web_url.rstrip('/')}/api/health") if web_url else {"ok": False, "skipped": "web_url not configured"},
+        },
+    }
+    write_json(out_dir / "run-environment.json", data)
+    return data
 
 
 def fetch_source_list(out_dir: Path) -> dict[str, Any]:
@@ -213,6 +290,36 @@ def _should_retry_import(final_run: dict[str, Any], refreshed_resource: dict[str
     return "budget exceeded" in text or "no current snapshot" in text
 
 
+def _snapshot_commit(snapshot: dict[str, Any] | None) -> str | None:
+    if not snapshot:
+        return None
+    raw_metadata = snapshot.get("metadata")
+    metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+    for key in ("commit", "source_commit", "git_commit", "revision", "sha"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    version = snapshot.get("version")
+    if snapshot.get("version_kind") in {"git", "git_commit", "commit"} and isinstance(version, str) and version.strip():
+        return version
+    return None
+
+
+def fetch_resource_snapshots(client: ApiClient, workspace_id: str, project_id: str, resource_id: str) -> list[dict[str, Any]]:
+    snapshots = client.request("GET", f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/snapshots")
+    return snapshots if isinstance(snapshots, list) else []
+
+
+def _current_snapshot(snapshots: list[dict[str, Any]], snapshot_id: str | None) -> dict[str, Any] | None:
+    for snapshot in snapshots:
+        if snapshot.get("is_current") is True:
+            return snapshot
+    for snapshot in snapshots:
+        if snapshot_id and str(snapshot.get("id")) == str(snapshot_id):
+            return snapshot
+    return snapshots[0] if snapshots else None
+
+
 def import_repo(client: ApiClient, workspace_id: str, project_id: str, repo: dict[str, Any], out_dir: Path, timeout_seconds: int) -> dict[str, Any]:
     repo_dir = out_dir / "imports" / repo["key"]
     repo_dir.mkdir(parents=True, exist_ok=True)
@@ -247,6 +354,15 @@ def import_repo(client: ApiClient, workspace_id: str, project_id: str, repo: dic
             write_json(attempt_dir / "index-run-final.json", final_run)
             refreshed_resource = client.request("GET", f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource['id']}")
             write_json(attempt_dir / "resource-final.json", refreshed_resource)
+            snapshots: list[dict[str, Any]] = []
+            current_snapshot: dict[str, Any] | None = None
+            if refreshed_resource.get("current_snapshot_id"):
+                try:
+                    snapshots = fetch_resource_snapshots(client, workspace_id, project_id, str(resource["id"]))
+                    current_snapshot = _current_snapshot(snapshots, str(refreshed_resource.get("current_snapshot_id")))
+                    write_json(attempt_dir / "snapshots.json", snapshots)
+                except Exception as exc:  # noqa: BLE001
+                    write_json(attempt_dir / "snapshots-error.json", {"error": str(exc)})
             manifest: dict[str, Any] | None = None
             if refreshed_resource.get("current_snapshot_id"):
                 try:
@@ -264,7 +380,10 @@ def import_repo(client: ApiClient, workspace_id: str, project_id: str, repo: dic
                 {
                     "status": status,
                     "resource_id": resource.get("id"),
+                    "resource_ref": refreshed_resource.get("name") or resource.get("name"),
                     "snapshot_id": refreshed_resource.get("current_snapshot_id"),
+                    "upstream_commit": _snapshot_commit(current_snapshot),
+                    "snapshots": snapshots,
                     "index_run_id": final_run.get("id"),
                     "index_run_status": final_run.get("status"),
                     "documents_seen": final_run.get("documents_seen"),
@@ -304,6 +423,24 @@ def load_question_bank() -> dict[str, Any]:
     return json.loads(QUESTION_BANK.read_text(encoding="utf-8"))
 
 
+def _question_target_keys(question: dict[str, Any]) -> list[str]:
+    target_repos = question.get("target_repos")
+    if isinstance(target_repos, list) and target_repos:
+        return [str(key) for key in target_repos]
+    return [str(question["target_repo"])]
+
+
+def _combined_import_type(records: list[dict[str, Any]]) -> str:
+    import_types = {record.get("import_type", "failed") for record in records}
+    if "failed" in import_types:
+        return "failed"
+    if "limited" in import_types:
+        return "limited"
+    if import_types == {"full"}:
+        return "full"
+    return "failed"
+
+
 def build_eval_manifest(
     bank: dict[str, Any],
     *,
@@ -323,8 +460,10 @@ def build_eval_manifest(
         resources.append(
             {
                 "key": repo["key"],
+                "name": repo.get("name", repo["key"]),
                 "target_repo": repo["url"],
                 "resource_ids": [resource_id] if resource_id else [],
+                "resource_ref": record.get("resource_ref"),
                 "snapshot_ids": [snapshot_id] if snapshot_id else [],
                 "upstream_commit": record.get("upstream_commit"),
                 "import_type": record.get("import_type", "failed"),
@@ -335,27 +474,31 @@ def build_eval_manifest(
     questions = []
     for question in bank["questions"]:
         q = {**defaults, **question}
-        record = by_key.get(q["target_repo"], {})
-        resource_id = record.get("resource_id")
-        snapshot_id = record.get("snapshot_id")
+        target_keys = _question_target_keys(q)
+        records = [by_key.get(key, {}) for key in target_keys]
+        resource_ids = [record.get("resource_id") for record in records if record.get("resource_id")]
+        resource_refs = [record.get("resource_ref") for record in records if record.get("resource_ref")]
+        snapshot_ids = [record.get("snapshot_id") for record in records if record.get("snapshot_id")]
         expected_result = q.get("expected_result", "pass")
-        expected_resource_ids = [] if expected_result == "expected_unanswerable" else ([resource_id] if resource_id else [])
+        expected_resource_ids = [] if expected_result == "expected_unanswerable" else list(resource_ids)
         q.update(
             {
-                "resource_ids": [resource_id] if resource_id else [],
-                "snapshot_ids": [snapshot_id] if snapshot_id else [],
+                "target_repos": target_keys,
+                "resource_ids": list(resource_ids),
+                "resource_refs": list(resource_refs),
+                "snapshot_ids": list(snapshot_ids),
                 "expected_resource_ids": expected_resource_ids,
                 "forbidden_resource_ids": [],
                 "expected_paths": q.get("expected_paths", []),
                 "expected_symbols": q.get("expected_symbols", []),
                 "required_texts": q.get("required_texts", []),
-                "import_type": record.get("import_type", "failed"),
+                "import_type": _combined_import_type(records),
             }
         )
-        if not resource_id:
+        if not resource_ids or len(resource_ids) != len(target_keys):
             q["min_citations"] = 0
             q["expected_result"] = "expected_unanswerable"
-            q["bad_answer_criteria"] = list(q.get("bad_answer_criteria") or []) + ["resource import failed before evaluation"]
+            q["bad_answer_criteria"] = list(q.get("bad_answer_criteria") or []) + ["one or more target resources failed import before evaluation"]
         questions.append(q)
     manifest = {
         "schema_version": "sourcebrief.eval-manifest.v1",
@@ -417,18 +560,39 @@ def run_eval_batches(client: ApiClient, workspace_id: str, project_id: str, mani
     return responses
 
 
+def verify_resource_refs(client: ApiClient, workspace_id: str, project_id: str, manifest: dict[str, Any], out_dir: Path) -> dict[str, Any]:
+    results: dict[str, Any] = {}
+    for resource in manifest["run"]["resources"]:
+        ref = resource.get("resource_ref") or resource.get("name") or resource.get("key")
+        query = f"What is {resource.get('name') or resource.get('key')}?"
+        payload = {"query": query, "resource_ref": ref, "top_k": 3}
+        try:
+            response = client.request("POST", f"/workspaces/{workspace_id}/projects/{project_id}/search", body=payload)
+            result = {"ok": True, "resource_ref": ref, "payload": payload, "response": response}
+        except Exception as exc:  # noqa: BLE001 - preserve resource_ref failure evidence
+            result = {"ok": False, "resource_ref": ref, "payload": payload, "error": str(exc)}
+        results[str(resource["key"])] = result
+        write_json(out_dir / "resource-ref" / f"{resource['key']}.json", result)
+    write_json(out_dir / "resource-ref-summary.json", results)
+    return results
+
+
 def collect_agent_contexts(client: ApiClient, workspace_id: str, project_id: str, manifest: dict[str, Any], out_dir: Path) -> dict[str, dict[str, Any]]:
     contexts: dict[str, dict[str, Any]] = {}
     for question in manifest["questions"]:
+        resource_refs = question.get("resource_refs") or []
         payload = {
             "query": question["query"],
             "runtime": "hermes",
             "profile": "hybrid",
             "top_k": question.get("top_k", 8),
-            "resource_ids": question.get("resource_ids") or None,
             "include_code_symbols": question.get("include_code_symbols", True),
             "max_chars": question.get("max_chars", 8000),
         }
+        if len(resource_refs) == 1:
+            payload["resource_ref"] = resource_refs[0]
+        else:
+            payload["resource_ids"] = question.get("resource_ids") or None
         try:
             response = client.request("POST", f"/workspaces/{workspace_id}/projects/{project_id}/agent-context", body=payload)
         except Exception as exc:  # noqa: BLE001 - preserve per-question error
@@ -453,14 +617,22 @@ def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, 
         citation_support: str | bool
         human_demo: str | bool
         retrieval_quality: str | bool
+        answer_text = str(context.get("answer") or context.get("summary") or "").strip()
+        quality_notes: list[str] = []
         if negative:
             retrieval_quality = "not_applicable"
             citation_support = "partial" if citation_count else True
             human_demo = "partial" if citation_count else True
+            if citation_count:
+                quality_notes.append("negative/control question returned citations; human must verify no unsupported claim is made")
         else:
             retrieval_quality = True if citation_count >= int(question.get("min_citations", 1)) and mechanical_ok else ("partial" if citation_count else "fail")
             citation_support = True if citation_count else "fail"
-            human_demo = True if citation_count and context_chars >= 200 else ("partial" if citation_count else "fail")
+            if answer_text:
+                human_demo = True if citation_count and context_chars >= 200 else ("partial" if citation_count else "fail")
+            else:
+                human_demo = "partial" if citation_count else "fail"
+                quality_notes.append("agent-context returned answer-ready context, not a synthesized human answer")
         partial_corpus = "partial" if question.get("import_type") == "limited" else ("fail" if question.get("import_type") == "failed" else True)
         checks = {
             "mechanical_api_success": True if mechanical_ok else "fail",
@@ -478,9 +650,21 @@ def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, 
             grade = "PASS"
         rationale = (
             f"mechanical_pass={mechanical_ok}; citations={citation_count}; context_chars={context_chars}; "
-            f"failure_reasons={eval_result.get('failure_reasons', [])}; import_type={question.get('import_type')}"
+            f"failure_reasons={eval_result.get('failure_reasons', [])}; import_type={question.get('import_type')}; "
+            f"quality_notes={quality_notes}"
         )
-        results.append({"id": qid, "grade": grade, "rationale": rationale, "checks": checks})
+        results.append(
+            {
+                "id": qid,
+                "grade": grade,
+                "rationale": rationale,
+                "checks": checks,
+                "expected_evidence_type": question.get("expected_evidence_type"),
+                "bad_answer_criteria": question.get("bad_answer_criteria", []),
+                "target_repos": question.get("target_repos", [question.get("target_repo")]),
+                "quality_notes": quality_notes,
+            }
+        )
     grade_counts = {"PASS": 0, "PARTIAL": 0, "FAIL": 0}
     for result in results:
         grade_counts[result["grade"]] += 1
@@ -527,16 +711,19 @@ def write_markdown_summary(out_dir: Path, manifest: dict[str, Any], imports: lis
         "",
         "## Import results",
         "",
-        "| Repo | Status | Import type | Files | Chunks | Symbols | Embeddings | Notes |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+        "| Repo | Attempt | Status | Import type | Resource ref | Upstream commit | Files | Chunks | Symbols | Embeddings | Notes |",
+        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for item in imports:
         notes = "; ".join(str(x) for x in (item.get("coverage_warnings") or [])) or item.get("error") or item.get("error_message") or ""
         lines.append(
-            "| {name} | {status} | {import_type} | {files} | {chunks} | {symbols} | {embeddings} | {notes} |".format(
+            "| {name} | {attempt} | {status} | {import_type} | {resource_ref} | {upstream_commit} | {files} | {chunks} | {symbols} | {embeddings} | {notes} |".format(
                 name=item["repo"]["name"],
+                attempt=item.get("attempt"),
                 status=item.get("status"),
                 import_type=item.get("import_type"),
+                resource_ref=item.get("resource_ref"),
+                upstream_commit=item.get("upstream_commit") or "not-recorded",
                 files=item.get("manifest_file_count"),
                 chunks=item.get("chunks_created"),
                 symbols=item.get("symbols_created"),
@@ -558,7 +745,7 @@ def write_markdown_summary(out_dir: Path, manifest: dict[str, Any], imports: lis
         json.dumps(report.get("grade_counts"), indent=2, sort_keys=True),
         "```",
         "",
-        "Raw redacted payloads are stored beside this README under `imports/`, `eval-batches/`, and `agent-context/`.",
+        "Raw redacted payloads are stored beside this README under `imports/`, `eval-batches/`, `agent-context/`, `resource-ref/`, and `run-environment.json`.",
     ]
     (out_dir / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -595,11 +782,13 @@ def main() -> int:
         imports=imports,
     )
     write_json(out_dir / "eval-manifest.json", manifest)
+    verify_resource_refs(client, workspace["id"], project["id"], manifest, out_dir)
     eval_responses = run_eval_batches(client, workspace["id"], project["id"], manifest, out_dir)
     contexts = collect_agent_contexts(client, workspace["id"], project["id"], manifest, out_dir)
     report = build_grade_report(manifest, eval_responses, contexts)
     write_json(out_dir / "eval-report.json", report)
     write_markdown_summary(out_dir, manifest, imports, report, source_fetch)
+    capture_run_environment(out_dir, api_url=args.api_url, web_url=args.web_url, argv=sys.argv)
     print(json.dumps({"output_dir": str(out_dir), "manifest_sha256": sha256_digest(manifest), "aggregate": report["aggregate"]}, indent=2, sort_keys=True))
     return 0
 
