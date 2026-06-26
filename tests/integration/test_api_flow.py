@@ -130,6 +130,50 @@ def test_workspace_project_resource_refresh_flow() -> None:
     assert denied.status_code == 404
 
 
+def test_agent_context_partial_resource_preserves_corpus_caveat() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id, _resource_id = create_flow(client, "partial-coverage")
+    resource = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "markdown",
+            "name": "Limited corpus runbook",
+            "uri": "doc://limited-corpus",
+            "source_config": {
+                "content": "Partial corpus marker token explains the retry safety boundary.",
+                "max_repo_files": 500,
+            },
+        },
+        headers=headers,
+    )
+    assert resource.status_code == 201, resource.text
+    resource_id = resource.json()["id"]
+    run = client.post(f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/refresh", headers=headers)
+    assert run.status_code == 202, run.text
+    assert wait_for_run(client, workspace_id, run.json()["id"], headers)["status"] == "succeeded"
+
+    response = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/agent-context",
+        json={"query": "partial corpus marker token", "resource_ids": [resource_id], "top_k": 5, "include_code_symbols": False},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    coverage = body["resource_coverage"][0]
+    assert coverage["resource_id"] == resource_id
+    assert coverage["coverage_status"] == "partial"
+    assert coverage["configured_budgets"] == {"max_repo_files": 500}
+    assert coverage["limited_budget_keys"] == ["max_repo_files"]
+    assert coverage["budget_reason"] == "limited import budget (max_repo_files=500)"
+    assert coverage["suggested_retry"]
+    assert "evidence may be partial" in " ".join(body["coverage_warnings"])
+    assert "Caveat:" in body["answer"]["text"]
+    assert any("evidence may be partial" in caveat for caveat in body["answer"]["caveats"])
+
+
+
 def test_agent_context_reports_unindexed_resource_coverage_warning() -> None:
     require_real_services()
     client = TestClient(app)

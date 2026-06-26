@@ -10,6 +10,7 @@
     "abstention_pass_rate": 1.0,
     "wrong_repo_failures": 0,
     "unsupported_claim_failures": 0,
+    "partial_corpus_risk_count": 0,
     "verdict": "PASS"
   },
   "results": [

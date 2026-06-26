@@ -220,7 +220,7 @@ def _validate_report_aggregate(aggregate: Any) -> dict[str, Any]:
         if key not in aggregate:
             raise EvalManifestError(f"report.aggregate.{key} is required")
         _optional_number(aggregate, key, context="report.aggregate", minimum=0, maximum=1)
-    for key in ("wrong_repo_failures", "unsupported_claim_failures"):
+    for key in ("wrong_repo_failures", "unsupported_claim_failures", "partial_corpus_risk_count"):
         if key not in aggregate:
             raise EvalManifestError(f"report.aggregate.{key} is required")
         value = _optional_number(aggregate, key, context="report.aggregate", minimum=0)
@@ -269,6 +269,7 @@ def _assert_report_aggregate_matches_results(
             )
     wrong_repo_failures = sum(1 for result in results if _check_failed(result["checks"]["wrong_repo_check"]))
     unsupported_claim_failures = sum(1 for result in results if _check_failed(result["checks"]["citation_support"]))
+    partial_corpus_risk_count = sum(1 for result in results if result["checks"]["partial_corpus_caveat"] == "partial")
     abstention_failures = sum(1 for result in results if _check_failed(result["checks"].get("abstained_correctly", "not_applicable")))
     if aggregate["wrong_repo_failures"] != wrong_repo_failures:
         raise EvalManifestError(
@@ -279,6 +280,11 @@ def _assert_report_aggregate_matches_results(
         raise EvalManifestError(
             f"report.aggregate.unsupported_claim_failures does not match per-result checks: "
             f"expected {unsupported_claim_failures}, got {aggregate['unsupported_claim_failures']}"
+        )
+    if aggregate["partial_corpus_risk_count"] != partial_corpus_risk_count:
+        raise EvalManifestError(
+            f"report.aggregate.partial_corpus_risk_count does not match per-result checks: "
+            f"expected {partial_corpus_risk_count}, got {aggregate['partial_corpus_risk_count']}"
         )
     expected_verdict = "PASS"
     if grade_counts["FAIL"] or wrong_repo_failures or unsupported_claim_failures or abstention_failures:
