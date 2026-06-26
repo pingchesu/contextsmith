@@ -68,10 +68,11 @@ This starts:
 | --- | --- |
 | API | `http://localhost:18000` |
 | Web | `http://localhost:13000` |
-| PostgreSQL | `localhost:55432` |
-| Redis | `localhost:6380` |
+| PostgreSQL | `127.0.0.1:55432` host bind, Compose-internal `postgres:5432` |
+| Redis | `127.0.0.1:6380` host bind, Compose-internal `redis:6379` |
 
 The API container runs migrations automatically in Compose through `SOURCEBRIEF_AUTO_MIGRATE=true`.
+Postgres and Redis are intentionally published on loopback only so remote or shared hosts do not expose internal data services by default. If you need remote DB/queue access for a disposable development environment, add an explicit Compose override and keep that choice out of shared/self-host defaults.
 
 ## 3. CLI first useful moment
 
@@ -247,7 +248,7 @@ make clean
 
 ### Port already in use
 
-SourceBrief uses ports `18000`, `13000`, `55432`, and `6380` by default. Stop the conflicting process or override ports in `.env`.
+SourceBrief uses ports `18000`, `13000`, `55432`, and `6380` by default. Stop the conflicting process or override ports in `.env`. Postgres and Redis bind to `127.0.0.1` by default; if you override them for remote access, make that exposure explicit in a local Compose override and confirm the host firewall policy.
 
 ### Docker services are stale
 
