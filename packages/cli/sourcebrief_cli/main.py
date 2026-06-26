@@ -519,10 +519,13 @@ def cmd_resource_schedule_due(client: SourceBriefClient, args: argparse.Namespac
 
 def cmd_search(client: SourceBriefClient, args: argparse.Namespace) -> Any:
     _require_scope(args)
+    body = {"query": args.query, "top_k": args.top_k, "resource_ids": _resource_ids(args.resource_id)}
+    if resource_ref := _resource_ref(args):
+        body["resource_ref"] = resource_ref
     return client.request(
         "POST",
         f"/workspaces/{args.workspace_id}/projects/{args.project_id}/search",
-        body={"query": args.query, "top_k": args.top_k, "resource_ids": _resource_ids(args.resource_id)},
+        body=body,
     )
 
 
@@ -622,6 +625,7 @@ def cmd_ask(client: SourceBriefClient, args: argparse.Namespace) -> Any:
 
 
 def cmd_quickstart_demo(client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    health = client.request("GET", "/readyz")
     workspace_slug = args.slug or f"sourcebrief-demo-{int(time.time())}"
     workspace = client.request("POST", "/workspaces", body={"name": args.workspace_name, "slug": workspace_slug}, expected={201})
     project = client.request(
@@ -661,24 +665,45 @@ def cmd_quickstart_demo(client: SourceBriefClient, args: argparse.Namespace) -> 
             query="What should an operator do when a payment job hits retryable upstream errors?",
             runtime="api",
             top_k=3,
-            resource_id=[resource["id"]],
-            resource=None,
+            resource_id=None,
+            resource=["Payment retry runbook"],
             include_code_symbols=False,
             max_chars=6000,
         ),
     )
+    mcp_validation: dict[str, Any] | None = None
+    if args.validate_mcp:
+        mcp_response = cmd_mcp_context(
+            client,
+            argparse.Namespace(
+                workspace_id=workspace["id"],
+                project_id=project["id"],
+                query="What should an operator do when a payment job hits retryable upstream errors?",
+                runtime="api",
+                top_k=3,
+                resource_id=None,
+                resource=["Payment retry runbook"],
+            ),
+        )
+        error = _mcp_error_message(mcp_response)
+        mcp_validation = {"status": "failed" if error else "passed", "error": error}
+    saved_config = dict(getattr(args, "_sourcebrief_config", {}) or {})
+    saved_config.update({"api_url": args.api_url.rstrip("/"), "workspace_id": workspace["id"], "project_id": project["id"]})
+    config_path = _save_cli_config(saved_config)
     return {
         "status": "indexed_and_ready_for_retrieval",
+        "health": health,
         "workspace_id": workspace["id"],
         "project_id": project["id"],
         "resource_id": resource["id"],
+        "workspace_name": workspace.get("name"),
+        "project_name": project.get("name"),
+        "resource_name": resource.get("name"),
+        "config_path": str(config_path),
+        "mcp_validation": mcp_validation,
         "index_run": resource_result.get("index_run"),
         "answer": _human_answer_brief(answer_packet),
-        "next_command": (
-            "sourcebrief ask --workspace-id "
-            f"{workspace['id']} --project-id {project['id']} --resource {resource['id']} "
-            "\"What should an operator do when payment retries fail?\""
-        ),
+        "next_command": 'sourcebrief ask --resource "Payment retry runbook" "What should an operator do when payment retries fail?"',
         "cleanup": "Delete the demo workspace from the web console when finished, or keep it for CLI experiments.",
     }
 
@@ -875,6 +900,7 @@ def build_parser() -> argparse.ArgumentParser:
     quickstart.add_argument("--project-name", default="First useful moment")
     quickstart.add_argument("--slug", help="workspace slug; defaults to a timestamped sourcebrief-demo-* slug")
     quickstart.add_argument("--timeout", type=int, default=120, help="seconds to wait for indexing")
+    quickstart.add_argument("--validate-mcp", action="store_true", help="also call the MCP context tool and report pass/fail")
     quickstart.set_defaults(func=cmd_quickstart_demo)
 
     doctor = sub.add_parser("doctor", help="check API/auth/project/MCP readiness")
@@ -1032,6 +1058,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Ask SourceBrief for cited context. Workspace/project can come from explicit flags or `sourcebrief use`.",
     )
     ask.add_argument("query", help="question to answer from cited project evidence")
+    ask.add_argument("--json", action="store_true", help="print the full agent-context packet for this ask")
     ask.add_argument("--workspace-id", help="workspace ID; overrides saved sourcebrief use value")
     ask.add_argument("--project-id", help="project ID; overrides saved sourcebrief use value")
     ask.add_argument("--runtime", default="api", choices=["api", "hermes", "claude", "codex", "cursor"])
@@ -1163,10 +1190,13 @@ def _print_default(command: str | None, data: Any) -> None:
             return
         if command == "quickstart-demo" and data.get("status") == "indexed_and_ready_for_retrieval":
             print("Quickstart demo: indexed and ready for retrieval")
-            print(f"  workspace_id: {data.get('workspace_id')}")
-            print(f"  project_id: {data.get('project_id')}")
-            print(f"  resource_id: {data.get('resource_id')}")
+            print(f"  workspace: {data.get('workspace_name')}")
+            print(f"  project: {data.get('project_name')}")
+            print(f"  resource: {data.get('resource_name')}")
+            print(f"  saved_defaults: {data.get('config_path')}")
             print(f"  index_status: {(data.get('index_run') or {}).get('status')}")
+            if data.get("mcp_validation"):
+                print(f"  mcp_validation: {(data.get('mcp_validation') or {}).get('status')}")
             answer = data.get("answer") or {}
             print(f"Answer: {answer.get('answer')}")
             print("Citations:")

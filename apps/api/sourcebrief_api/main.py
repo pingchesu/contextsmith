@@ -6216,8 +6216,19 @@ def search_project(
     session: Session = Depends(get_session),
 ) -> SearchResponse:
     require_scope(principal, "project:query")
-    resource_ids = _effective_resource_ids(principal, payload.resource_ids)
     _require_project_access(session, workspace_id, project_id, principal)
+    if payload.resource_ref:
+        if payload.resource_ids:
+            raise HTTPException(status_code=422, detail={"code": "conflicting_resource_locator", "message": "use resource_ids or resource_ref, not both"})
+        resource = _runtime_resolve_resource_ref(
+            session,
+            workspace_id,
+            project_id,
+            principal,
+            {"resource_ref": payload.resource_ref},
+        )
+        payload = payload.model_copy(update={"resource_ids": [resource.id], "resource_ref": None})
+    resource_ids = _effective_resource_ids(principal, payload.resource_ids)
 
     resource_clause = ""
     params: dict = {
@@ -7548,10 +7559,10 @@ def agent_context(
     session: Session = Depends(get_session),
 ) -> AgentContextResponse:
     require_scope(principal, "project:query")
+    _require_project_access(session, workspace_id, project_id, principal)
     payload = _agent_context_with_resource_ref(session, workspace_id, project_id, principal, payload)
     resource_ids = _effective_resource_ids(principal, payload.resource_ids)
     payload = payload.model_copy(update={"resource_ids": resource_ids})
-    _require_project_access(session, workspace_id, project_id, principal)
     pack_version = _resolve_runtime_pack_version(session, workspace_id, project_id, payload, principal)
     if pack_version is not None:
         return _build_pack_agent_context_response(

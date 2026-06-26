@@ -960,6 +960,7 @@ class AuditEventListResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     resource_ids: list[UUID] | None = None
+    resource_ref: str | None = Field(default=None, min_length=1)
     top_k: int = Field(default=10, ge=1, le=50)
 
 

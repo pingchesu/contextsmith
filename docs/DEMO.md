@@ -90,14 +90,23 @@ RESOURCE_ID=$(printf '%s' "$RESOURCE_JSON" \
   | python -c 'import json,sys; print(json.load(sys.stdin)["resource"]["id"])')
 ```
 
-## 4. Ask for agent-shaped context
+## 4. Ask for cited context
 
-Golden path:
+Golden path: ask by the human resource name and get a concise cited answer.
 
 ```bash
-sourcebrief --json ask \
+sourcebrief ask \
   --runtime hermes \
-  --resource-id "$RESOURCE_ID" \
+  --resource "Payment retry runbook" \
+  "What should I check when the payment retry queue stalls?"
+```
+
+Use raw JSON only when validating the runtime packet contract:
+
+```bash
+sourcebrief ask --json \
+  --runtime hermes \
+  --resource "Payment retry runbook" \
   "What should I check when the payment retry queue stalls?"
 ```
 
