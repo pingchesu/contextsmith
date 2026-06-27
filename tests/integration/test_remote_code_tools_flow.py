@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from redis import Redis
 from sqlalchemy import text
 
+from sourcebrief_api import main as api_main
 from sourcebrief_api.main import app
 from sourcebrief_shared.config import get_settings
 from sourcebrief_shared.db import get_engine, get_sessionmaker
@@ -197,6 +198,65 @@ def test_remote_code_http_and_mcp_flow(tmp_path) -> None:
     mcp_read_result = mcp_read_ref.json()["result"]
     assert not mcp_read_result.get("isError"), mcp_read_result
     assert "reconcile_cart" in mcp_read_result["structuredContent"]["content"]
+
+
+def test_lookup_all_fails_soft_when_code_scan_budget_exceeded(tmp_path, monkeypatch) -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id = make_project(client, "phase3-lookup-budget")
+    repo_path = str(tmp_path / "repo")
+    build_repo(repo_path)
+    os.environ["SOURCEBRIEF_ALLOW_LOCAL_GIT"] = "true"
+    resource_id = add_git_resource(client, workspace_id, project_id, headers, repo_path)
+    ingest(resource_id, workspace_id, project_id)
+    monkeypatch.setattr(api_main, "MAX_SCANNED_FILES", 1)
+
+    broad_grep = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/remote-code/grep_code",
+        json={"pattern": "checkoutrepo42", "resource_ids": [resource_id]},
+        headers=headers,
+    )
+    assert broad_grep.status_code == 422, broad_grep.text
+    broad_detail = broad_grep.json()["detail"]
+    assert broad_detail["code"] == "scan_budget_exceeded"
+    assert broad_detail["scan_budget"]["max_files"] == 1
+    assert broad_detail["eligible_files"] >= 2
+    assert broad_detail["scanned_files_before_limit"] == 1
+    assert "path_glob" in " ".join(broad_detail["retry_guidance"])
+
+    scoped_grep = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/remote-code/grep_code",
+        json={"pattern": "checkoutrepo42", "resource_ids": [resource_id], "path_glob": "README.md"},
+        headers=headers,
+    )
+    assert scoped_grep.status_code == 200, scoped_grep.text
+    assert scoped_grep.json()["matches"][0]["path"] == "README.md"
+
+    lookup = client.post(
+        f"/mcp/{workspace_id}/{project_id}",
+        json={
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "sourcebrief.lookup",
+                "arguments": {"query": "checkoutrepo42", "search_in": "all", "resource_ids": [resource_id], "top_k": 3},
+            },
+        },
+        headers=headers,
+    )
+    assert lookup.status_code == 200, lookup.text
+    result = lookup.json()["result"]
+    assert result.get("isError", False) is False
+    content = result["structuredContent"]
+    assert content["mode"] == "all"
+    assert content["docs"]["hits"]
+    assert content["code"] is None
+    assert "symbols" in content["symbols"]
+    warning = content["warnings"][0]
+    assert warning["code"] == "code_scan_budget_exceeded"
+    assert warning["detail"]["scan_budget"]["max_files"] == 1
+    assert any(step["name"] == "sourcebrief.grep_code" for step in content["next_steps"])
 
 
 def test_remote_code_rejects_bad_paths_and_regex(tmp_path) -> None:

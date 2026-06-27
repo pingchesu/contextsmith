@@ -6426,7 +6426,56 @@ def code_search_project(
 
 
 def _remote_code_error(exc: RemoteCodeError) -> HTTPException:
-    return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+    if exc.details:
+        detail.update(exc.details)
+    return HTTPException(status_code=exc.status_code, detail=detail)
+
+
+def _scan_budget_exceeded_error(
+    session: Session,
+    predicates: list[Any],
+    *,
+    path_glob: str | None,
+    scanned_files: int,
+    scanned_bytes: int,
+) -> RemoteCodeError:
+    eligible_files, eligible_bytes = session.execute(
+        select(func.count(SnapshotFile.id), func.coalesce(func.sum(SnapshotFile.byte_size), 0)).where(*predicates)
+    ).one()
+    return RemoteCodeError(
+        "scan_budget_exceeded",
+        "remote code scan exceeds file/byte budget; narrow the search to cited paths before broad code drilldown",
+        status_code=422,
+        details={
+            "scan_budget": {"max_files": MAX_SCANNED_FILES, "max_bytes": MAX_SCANNED_BYTES},
+            "eligible_files": int(eligible_files or 0),
+            "eligible_bytes": int(eligible_bytes or 0),
+            "scanned_files_before_limit": scanned_files,
+            "scanned_bytes_at_limit": scanned_bytes,
+            "path_glob": path_glob,
+            "retry_guidance": [
+                "Use sourcebrief.ask or sourcebrief.lookup(search_in='docs') first, then drill into cited files/directories.",
+                "For grep_code, retry with path_glob set to a cited file or directory, for example README.md, docs/**, or src/**.",
+                "For search_code budget failures, switch to grep_code with path_glob or read_file with an exact cited path; search_code intentionally stays broad and does not accept path_glob.",
+            ],
+        },
+    )
+
+
+def _lookup_soft_warning(exc: HTTPException, *, facet: str) -> dict[str, Any] | None:
+    detail: dict[str, Any] = exc.detail if isinstance(exc.detail, dict) else {}
+    if detail.get("code") != "scan_budget_exceeded":
+        return None
+    return {
+        "code": f"{facet}_scan_budget_exceeded",
+        "message": f"{facet} facet exceeded the remote-code scan budget; returning the available lookup facets instead.",
+        "detail": detail,
+        "retry_guidance": [
+            "Use search_in='docs' first when docs are enough.",
+            "For code drilldown, retry sourcebrief.grep_code with resource_ref/resource_ids and a path_glob from cited paths, or sourcebrief.read_file with an exact cited path.",
+        ],
+    }
 
 
 def _snapshot_commit(snapshot: SourceSnapshot | None) -> str | None:
@@ -6557,7 +6606,13 @@ def _current_snapshot_files(
     for file_row, snapshot in rows:
         total_bytes += int(file_row.byte_size or 0)
         if len(selected_ids) >= MAX_SCANNED_FILES or total_bytes > MAX_SCANNED_BYTES:
-            raise RemoteCodeError("scan_budget_exceeded", "remote code scan exceeds file/byte budget", status_code=422)
+            raise _scan_budget_exceeded_error(
+                session,
+                predicates,
+                path_glob=path_glob,
+                scanned_files=len(selected_ids),
+                scanned_bytes=total_bytes,
+            )
         selected_ids.append(file_row.id)
         snapshots_by_file_id[file_row.id] = snapshot
     if not selected_ids:
@@ -9297,16 +9352,38 @@ def _runtime_lookup(session: Session, workspace_id: UUID, project_id: UUID, prin
     symbols_args = _runtime_remote_args(base_args, {"name", "kind", "resource_ids", "top_k"})
     symbols_args.setdefault("name", query)
     symbols_args.setdefault("top_k", 10)
-    return {
+    warnings: list[dict[str, Any]] = []
+    code: dict[str, Any] | None = None
+    try:
+        code = jsonable_encoder(remote_search_code(workspace_id, project_id, RemoteSearchCodeRequest(**code_args), principal, session))
+    except HTTPException as exc:
+        warning = _lookup_soft_warning(exc, facet="code")
+        if warning is None:
+            raise
+        warnings.append(warning)
+    symbols = jsonable_encoder(remote_find_symbol(workspace_id, project_id, RemoteFindSymbolRequest(**symbols_args), principal, session))
+    next_steps = [
+        {"name": "sourcebrief.read_section", "reason": "Read a cited docs hit exactly before making claims."},
+        {"name": "sourcebrief.read_file", "reason": "Read a code hit exactly by resource_ref/resource_id and path."},
+    ]
+    if warnings:
+        next_steps.insert(
+            1,
+            {
+                "name": "sourcebrief.grep_code",
+                "reason": "For large repos, retry code drilldown with a cited path_glob instead of broad search.",
+            },
+        )
+    response: dict[str, Any] = {
         "mode": "all",
         "docs": docs,
-        "code": jsonable_encoder(remote_search_code(workspace_id, project_id, RemoteSearchCodeRequest(**code_args), principal, session)),
-        "symbols": jsonable_encoder(remote_find_symbol(workspace_id, project_id, RemoteFindSymbolRequest(**symbols_args), principal, session)),
-        "next_steps": [
-            {"name": "sourcebrief.read_section", "reason": "Read a cited docs hit exactly before making claims."},
-            {"name": "sourcebrief.read_file", "reason": "Read a code hit exactly by resource_ref/resource_id and path."},
-        ],
+        "code": code,
+        "symbols": symbols,
+        "next_steps": next_steps,
     }
+    if warnings:
+        response["warnings"] = warnings
+    return response
 
 
 def _runtime_discover(session: Session, workspace_id: UUID, project_id: UUID, principal: Principal, args: dict[str, Any]) -> dict[str, Any]:

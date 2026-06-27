@@ -105,10 +105,12 @@ When Hermes, Claude Code, Codex, or Cursor is working on an issue, use this loop
 
    ```text
    sourcebrief.lookup(query="require_scope service tokens", search_in="all")
-   sourcebrief.grep_code(pattern="require_scope", path_glob="*.py")
+   sourcebrief.grep_code(pattern="require_scope", path_glob="apps/api/**")
    sourcebrief.find_symbol(name="create_api_token")
    sourcebrief.read_file(resource_ref="SourceBrief API", path="apps/api/sourcebrief_api/main.py", start_line=2020, end_line=2095)
    ```
+
+   On large partial repos, `lookup(search_in="all")` returns docs/symbols plus a structured warning if the code-search facet exceeds the remote scan budget. Use cited paths from `ask`/`lookup` as `path_glob` before broad `grep_code`.
 
 4. Ask an impact question before editing.
 
@@ -141,7 +143,7 @@ Use these MCP tools for remote code:
 | --- | --- |
 | Start with a cited answer | `sourcebrief.ask` / `sourcebrief.get_agent_context` |
 | Discover available sources and architecture | `sourcebrief.discover` / `sourcebrief.list_sources` / `sourcebrief.get_architecture` |
-| Search docs/code/symbols by question | `sourcebrief.lookup` (`search_in=docs` works with context-only tokens; default `all` returns docs plus a warning when `code:read` is absent) |
+| Search docs/code/symbols by question | `sourcebrief.lookup` (`search_in=docs` works with context-only tokens; default `all` returns docs plus a warning when `code:read` is absent or code scan exceeds budget) |
 | Search indexed docs/artifacts | `sourcebrief.search` |
 | Read exact cited sections | `sourcebrief.read_section` |
 | Search indexed source files semantically | `sourcebrief.search_code` |
