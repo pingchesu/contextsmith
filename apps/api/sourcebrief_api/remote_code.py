@@ -106,6 +106,7 @@ class RemoteCodeError(Exception):
     code: str
     message: str
     status_code: int = 422
+    details: dict[str, object] | None = None
 
 
 def validate_repo_path(path: str) -> str:
