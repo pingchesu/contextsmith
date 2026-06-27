@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+from sourcebrief_api.main import _apply_snapshot_coverage
 from sourcebrief_api.schemas import ResourceRead
 
 
@@ -48,6 +49,38 @@ def test_resource_read_marks_explicit_limited_budget_as_partial():
     assert resource.coverage_status == "partial"
     assert resource.index_diagnostics["configured_budgets"] == {"max_repo_files": 500}
     assert "evidence may be partial" in " ".join(resource.coverage_warnings)
+
+
+def test_resource_read_marks_explicit_index_budget_as_partial():
+    resource = ResourceRead.model_validate(_resource(source_config={"max_chunks": 5000}), from_attributes=True)
+
+    assert resource.queryable is True
+    assert resource.coverage_status == "partial"
+    assert resource.index_diagnostics["configured_budgets"] == {"max_chunks": 5000}
+    assert "evidence may be partial" in " ".join(resource.coverage_warnings)
+
+
+def test_snapshot_index_budget_truncation_marks_queryable_partial_with_retry():
+    resource = ResourceRead.model_validate(_resource(), from_attributes=True)
+
+    updated = _apply_snapshot_coverage(
+        resource,
+        {
+            "coverage_truncated": True,
+            "coverage_warnings": ["chunk budget exceeded max_chunks=2 chunks_created=2"],
+            "index_budget_stats": {"max_chunks": 2, "chunk_budget_exceeded": True, "chunks_created_at_limit": 2},
+            "suggested_retry": "retry with narrower include/exclude filters",
+        },
+    )
+
+    assert updated.queryable is True
+    assert updated.coverage_status == "partial"
+    assert updated.index_diagnostics["configured_budgets"] == {"max_chunks": 2}
+    assert updated.index_diagnostics["index_budget_stats"]["chunk_budget_exceeded"] is True
+    assert updated.index_diagnostics["suggested_retry"] == "retry with narrower include/exclude filters"
+    joined = " ".join(updated.coverage_warnings)
+    assert "chunk budget exceeded" in joined
+    assert "evidence may be partial" in joined
 
 
 def test_resource_read_failed_status_with_current_snapshot_remains_queryable_but_warns():

@@ -286,10 +286,14 @@ class ResourceRead(BaseModel):
         warnings: list[str] = []
         budgets = {
             key: source_config.get(key)
-            for key in ("max_file_bytes", "max_repo_files", "max_repo_bytes", "clone_timeout")
+            for key in ("max_file_bytes", "max_repo_files", "max_repo_bytes", "clone_timeout", "max_chunks", "max_symbols")
             if source_config.get(key) is not None
         }
-        limited_keys = [key for key in ("max_file_bytes", "max_repo_files", "max_repo_bytes") if source_config.get(key) is not None]
+        limited_keys = [
+            key
+            for key in ("max_file_bytes", "max_repo_files", "max_repo_bytes", "max_chunks", "max_symbols")
+            if source_config.get(key) is not None
+        ]
         partial = bool(source_config.get("partial") or source_config.get("limited") or source_config.get("import_profile") in {"limited", "limited500", "limited250"} or limited_keys)
         if not data.get("current_snapshot_id"):
             warnings.append("resource has no current snapshot and is not queryable yet")

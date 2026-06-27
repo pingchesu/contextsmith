@@ -338,9 +338,13 @@ from sourcebrief_worker.bundle_ingest import (
     validate_zip_before_extract,
 )
 from sourcebrief_worker.ingestion import (
+    DEFAULT_MAX_CHUNKS,
     DEFAULT_MAX_DOCUMENT_BYTES,
+    DEFAULT_MAX_SYMBOLS,
     DEFAULT_MAX_URL_BYTES,
+    HARD_MAX_CHUNKS,
     HARD_MAX_DOCUMENT_BYTES,
+    HARD_MAX_SYMBOLS,
     HARD_MAX_URL_BYTES,
     _work_base,
     parse_positive_int,
@@ -1560,6 +1564,17 @@ def _validate_source_config(resource_type: str, uri: str, source_config: dict) -
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     if rtype in FOLDER_BUNDLE_RESOURCE_TYPES:
         raise HTTPException(status_code=422, detail="folder bundles must be created through the zip upload endpoint")
+    try:
+        if "max_chunks" in config:
+            config["max_chunks"] = parse_positive_int(
+                config.get("max_chunks"), default=DEFAULT_MAX_CHUNKS, hard_limit=HARD_MAX_CHUNKS, name="max_chunks"
+            )
+        if "max_symbols" in config:
+            config["max_symbols"] = parse_positive_int(
+                config.get("max_symbols"), default=DEFAULT_MAX_SYMBOLS, hard_limit=HARD_MAX_SYMBOLS, name="max_symbols"
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return config
 
 
@@ -3014,28 +3029,40 @@ def _apply_snapshot_coverage(data: ResourceRead, snapshot_meta: dict | None) -> 
     meta = snapshot_meta or {}
     raw_file_stats = meta.get("file_budget_stats")
     file_stats: dict[str, Any] = raw_file_stats if isinstance(raw_file_stats, dict) else {}
+    raw_index_stats = meta.get("index_budget_stats")
+    index_stats: dict[str, Any] = raw_index_stats if isinstance(raw_index_stats, dict) else {}
     truncated = bool(
         meta.get("coverage_truncated")
         or file_stats.get("truncated_by_max_files")
         or file_stats.get("skipped_total_bytes")
         or file_stats.get("skipped_max_file_bytes")
+        or index_stats.get("chunk_budget_exceeded")
+        or index_stats.get("symbol_budget_exceeded")
     )
     if not truncated:
         return data
     warnings = list(data.coverage_warnings)
-    warning = "current snapshot was truncated by file/byte import budgets; evidence may be partial"
-    if warning not in warnings:
-        warnings.append(warning)
+    primary_warning = "current snapshot was truncated by import/index budgets; evidence may be partial"
+    for coverage_warning in [primary_warning, *[str(item) for item in meta.get("coverage_warnings") or []]]:
+        if coverage_warning not in warnings:
+            warnings.append(coverage_warning)
     budgets = dict(data.index_diagnostics.get("configured_budgets", {}))
     for key in ("max_files", "max_total_bytes", "max_file_bytes"):
         if file_stats.get(key) is not None:
             budgets[key] = file_stats[key]
         elif meta.get(key) is not None:
             budgets[key] = meta[key]
+    for key in ("max_chunks", "max_symbols"):
+        if index_stats.get(key) is not None:
+            budgets[key] = index_stats[key]
     diagnostics = dict(data.index_diagnostics)
     diagnostics["configured_budgets"] = budgets
     diagnostics["file_budget_stats"] = file_stats
-    diagnostics["suggested_retry"] = "retry with narrower include/exclude filters, a source subpath, or an intentional higher import budget"
+    diagnostics["index_budget_stats"] = index_stats
+    diagnostics["suggested_retry"] = str(
+        meta.get("suggested_retry")
+        or "retry with narrower include/exclude filters, a source subpath, or an intentional higher import budget"
+    )
     data.coverage_status = "partial" if data.queryable else data.coverage_status
     data.coverage_warnings = warnings
     data.index_diagnostics = diagnostics

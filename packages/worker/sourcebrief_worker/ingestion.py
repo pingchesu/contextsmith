@@ -1154,19 +1154,129 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
     snapshot.version_kind = version_kind
     snapshot.meta = meta
 
-    max_chunks = min(
-        int((resource.source_config or {}).get("max_chunks", DEFAULT_MAX_CHUNKS)),
-        HARD_MAX_CHUNKS,
+    max_chunks = parse_positive_int(
+        (resource.source_config or {}).get("max_chunks"), default=DEFAULT_MAX_CHUNKS, hard_limit=HARD_MAX_CHUNKS, name="max_chunks"
     )
-    max_symbols = min(
-        int((resource.source_config or {}).get("max_symbols", DEFAULT_MAX_SYMBOLS)),
-        HARD_MAX_SYMBOLS,
+    max_symbols = parse_positive_int(
+        (resource.source_config or {}).get("max_symbols"), default=DEFAULT_MAX_SYMBOLS, hard_limit=HARD_MAX_SYMBOLS, name="max_symbols"
     )
     chunks_created = 0
     symbols_created = 0
+    indexed_docs: list[dict] = []
+    budget_warnings: list[str] = []
+    budget_stats: dict[str, object] = {
+        "max_chunks": max_chunks,
+        "max_symbols": max_symbols,
+        "documents_collected": len(docs),
+    }
+    chunk_budget_exceeded = False
+    symbol_budget_exceeded = False
+
+    for doc in docs:
+        doc_hash = content_hash(doc["content"])
+        if not symbol_budget_exceeded:
+            for symbol in extract_code_symbols(doc.get("path"), doc["content"]):
+                if symbols_created >= max_symbols:
+                    symbol_budget_exceeded = True
+                    budget_stats.update(
+                        {
+                            "symbol_budget_exceeded": True,
+                            "symbols_created_at_limit": symbols_created,
+                        }
+                    )
+                    budget_warnings.append(
+                        _budget_exceeded_message(
+                            "symbol",
+                            resource.id,
+                            limit_name="max_symbols",
+                            limit=max_symbols,
+                            documents_collected=len(docs),
+                            created_count=symbols_created,
+                            retry_hint=(
+                                "use a docs-only/source-subpath import, add include/exclude filters, "
+                                "or raise max_symbols after confirming the repo scope is intentional."
+                            ),
+                        )
+                    )
+                    break
+                session.add(
+                    CodeSymbol(
+                        workspace_id=resource.workspace_id,
+                        project_id=resource.project_id,
+                        resource_id=resource.id,
+                        source_snapshot_id=snapshot.id,
+                        path=symbol.path,
+                        name=symbol.name,
+                        kind=symbol.kind,
+                        language=symbol.language,
+                        line_start=symbol.line_start,
+                        line_end=symbol.line_end,
+                        signature=symbol.signature,
+                        content_hash=doc_hash,
+                        meta=doc.get("meta", {}),
+                    )
+                )
+                symbols_created += 1
+        doc_has_chunk = False
+        for ordinal, piece in enumerate(iter_chunks(doc["content"])):
+            if chunks_created >= max_chunks:
+                chunk_budget_exceeded = True
+                budget_stats.update(
+                    {
+                        "chunk_budget_exceeded": True,
+                        "chunks_created_at_limit": chunks_created,
+                        "documents_indexed_before_chunk_limit": len(indexed_docs),
+                    }
+                )
+                budget_warnings.append(
+                    _budget_exceeded_message(
+                        "chunk",
+                        resource.id,
+                        limit_name="max_chunks",
+                        limit=max_chunks,
+                        documents_collected=len(docs),
+                        created_count=chunks_created,
+                        retry_hint=(
+                            "lower max_repo_files/max_repo_bytes, use a docs-only/source-subpath import, "
+                            "add include/exclude filters, or raise max_chunks after confirming the repo scope is intentional."
+                        ),
+                    )
+                )
+                break
+            chunk = Chunk(
+                workspace_id=resource.workspace_id,
+                project_id=resource.project_id,
+                resource_id=resource.id,
+                source_snapshot_id=snapshot.id,
+                path=doc.get("path"),
+                title=doc.get("title"),
+                content=piece,
+                ordinal=ordinal,
+                content_hash=content_hash(piece),
+                meta=doc.get("meta", {}),
+            )
+            session.add(chunk)
+            session.flush()
+            _store_chunk_embedding(session, chunk)
+            chunks_created += 1
+            if not doc_has_chunk:
+                indexed_docs.append(doc)
+                doc_has_chunk = True
+        if chunk_budget_exceeded:
+            break
+
+    docs_for_index = indexed_docs if chunk_budget_exceeded else docs
+    if budget_warnings:
+        snapshot.meta = {
+            **(snapshot.meta or {}),
+            "coverage_truncated": True,
+            "index_budget_stats": budget_stats,
+            "coverage_warnings": [*list((snapshot.meta or {}).get("coverage_warnings") or []), *budget_warnings],
+            "suggested_retry": "retry with narrower include/exclude filters, a source subpath/docs-only import, or an intentional higher index budget",
+        }
     if rtype in GIT_TYPES | FOLDER_BUNDLE_TYPES:
-        for doc in docs:
-            path = validate_snapshot_path(str(doc.get("path") or doc.get("title") or f"document-{len(docs)}.txt"))
+        for idx, doc in enumerate(docs_for_index):
+            path = validate_snapshot_path(str(doc.get("path") or doc.get("title") or f"document-{idx}.txt"))
             doc_hash = content_hash(doc["content"])
             session.add(
                 SnapshotFile(
@@ -1184,83 +1294,18 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
                     meta=doc.get("meta", {}),
                 )
             )
-        
-    for doc in docs:
-        path = str(doc.get("path") or doc.get("title") or f"document-{len(docs)}.txt")
-        doc_hash = content_hash(doc["content"])
-        for symbol in extract_code_symbols(doc.get("path"), doc["content"]):
-            if symbols_created >= max_symbols:
-                raise RuntimeError(
-                    _budget_exceeded_message(
-                        "symbol",
-                        resource.id,
-                        limit_name="max_symbols",
-                        limit=max_symbols,
-                        documents_collected=len(docs),
-                        created_count=symbols_created,
-                        retry_hint=(
-                            "use a docs-only/source-subpath import, add include/exclude filters, "
-                            "or raise max_symbols after confirming the repo scope is intentional."
-                        ),
-                    )
-                )
-            session.add(
-                CodeSymbol(
-                    workspace_id=resource.workspace_id,
-                    project_id=resource.project_id,
-                    resource_id=resource.id,
-                    source_snapshot_id=snapshot.id,
-                    path=symbol.path,
-                    name=symbol.name,
-                    kind=symbol.kind,
-                    language=symbol.language,
-                    line_start=symbol.line_start,
-                    line_end=symbol.line_end,
-                    signature=symbol.signature,
-                    content_hash=doc_hash,
-                    meta=doc.get("meta", {}),
-                )
-            )
-            symbols_created += 1
-        for ordinal, piece in enumerate(iter_chunks(doc["content"])):
-            if chunks_created >= max_chunks:
-                raise RuntimeError(
-                    _budget_exceeded_message(
-                        "chunk",
-                        resource.id,
-                        limit_name="max_chunks",
-                        limit=max_chunks,
-                        documents_collected=len(docs),
-                        created_count=chunks_created,
-                        retry_hint=(
-                            "lower max_repo_files/max_repo_bytes, use a docs-only/source-subpath import, "
-                            "add include/exclude filters, or raise max_chunks after confirming the repo scope is intentional."
-                        ),
-                    )
-                )
-            chunk = Chunk(
-                workspace_id=resource.workspace_id,
-                project_id=resource.project_id,
-                resource_id=resource.id,
-                source_snapshot_id=snapshot.id,
-                path=doc.get("path"),
-                title=doc.get("title"),
-                content=piece,
-                ordinal=ordinal,
-                content_hash=content_hash(piece),
-                meta=doc.get("meta", {}),
-            )
-            session.add(chunk)
-            session.flush()
-            _store_chunk_embedding(session, chunk)
-            chunks_created += 1
 
     snapshot.status = "succeeded"
     snapshot.indexed_at = datetime.now(UTC)
-    graph_stats = build_graph_index(session, resource, snapshot, docs)
+    graph_stats = build_graph_index(session, resource, snapshot, docs_for_index)
     if rtype in FOLDER_BUNDLE_TYPES | GIT_TYPES:
         if rtype in FOLDER_BUNDLE_TYPES:
-            manifest_inputs = [ManifestFileInput(**_manifest_input(row)) for row in manifest_file_rows]
+            if chunk_budget_exceeded:
+                indexed_paths = {str(doc.get("path") or doc.get("title") or f"document-{idx}.txt") for idx, doc in enumerate(docs_for_index)}
+                manifest_rows_for_index = [row for row in manifest_file_rows if str(row.get("normalized_path")) in indexed_paths]
+            else:
+                manifest_rows_for_index = manifest_file_rows
+            manifest_inputs = [ManifestFileInput(**_manifest_input(row)) for row in manifest_rows_for_index]
         else:
             manifest_inputs = [
                 ManifestFileInput(
@@ -1274,7 +1319,7 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
                     status="pending",
                     section_count=0,
                 )
-                for idx, doc in enumerate(docs)
+                for idx, doc in enumerate(docs_for_index)
             ]
         manifest = create_resource_manifest(
             session,
@@ -1288,7 +1333,7 @@ def ingest_resource(session: Session, resource: Resource, run: IndexRun) -> Sour
             session,
             resource=resource,
             manifest=manifest,
-            redacted_docs=docs,
+            redacted_docs=docs_for_index,
         )
     run.documents_seen = len(docs)
     run.chunks_created = chunks_created

@@ -231,6 +231,7 @@ The product is working when the answer is not just plausible. It should be inspe
 Real repos may exceed the default import budgets for chunks or code symbols. SourceBrief should not leave that ambiguous:
 
 - Sources with no current snapshot are marked **not queryable** even if retrieval is enabled.
+- Chunk/symbol budget limits preserve a queryable **partial** snapshot when SourceBrief has already indexed useful evidence; the resource and agent context surface coverage warnings.
 - Failed index runs show the budget that failed, the configured limit, and a suggested retry path.
 - Limited/fallback imports are marked **partial**; generated context packets include coverage warnings so agents do not over-trust a subset corpus.
 - If a repo is too broad, retry with a smaller `max_repo_files` / `max_repo_bytes`, a docs-only or source-subpath import, include/exclude filters, or an intentional higher budget.
