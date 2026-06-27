@@ -95,7 +95,7 @@ First wide attempts failed for ECC, gstack, and DeerFlow with `max_chunks=5000` 
 
 ### 2. SourceBrief is credible for partial-corpus retrieval, but launch verdict remains RISK
 
-For this corpus, SourceBrief produced cited context for all 50 questions once the imports were bounded. However, all imported corpora are partial, negative-control questions still require human follow-up, and the evaluated runtime path is context generation rather than a synthesized human answer. This supports a launch-readiness verdict of `RISK`, not `PASS`.
+For this corpus, SourceBrief produced cited context for all 50 questions once the imports were bounded. However, all imported corpora are partial, negative-control questions still require human follow-up, and development-quality retrieval providers are not production launch evidence. This supports a launch-readiness verdict of `RISK`, not `PASS`.
 
 ## Reproduce
 
@@ -129,6 +129,8 @@ SOURCEBRIEF_API_URL="$API_URL" SOURCEBRIEF_WEB_URL="$WEB_URL" \
 ```
 
 Raw evidence generation now requires a clean worktree by default. If an operator intentionally needs a non-canonical exploratory run from local edits, pass `--allow-dirty-evidence`; the resulting `run-environment.json` records `repo_dirty=true` plus the dirty paths. To validate or re-summarize an existing evidence directory without re-importing resources, pass `--reuse-existing-evidence`; the runner preserves the previous `raw_generation_command` and records the later validation command separately.
+
+Provider health is a separate launch-readiness signal from mechanical API health. Local smoke/dev runs may use hashing embeddings or term-overlap rerankers marked `dev_quality=true`; the eval report records those under `aggregate.provider_quality` and `aggregate.risk_reasons`. A launch-readiness report cannot remain `PASS` with dev-quality retrieval providers unless the operator passes the explicit `--allow-dev-quality-providers` dev-mode override.
 
 The runner stores redacted raw payloads under the output directory:
 

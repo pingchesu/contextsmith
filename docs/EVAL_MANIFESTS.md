@@ -120,7 +120,7 @@ Each result must include:
 - optional `linked_child_issue_ids`
 - optional `raw_output_ref` pointing to redacted raw evidence
 
-The report also has a required `aggregate` object with mechanical, retrieval, and human-answer pass rates, wrong-repo/unsupported-claim failure counts, and a `PASS`/`RISK`/`BLOCK` verdict. The validator cross-checks those aggregate values against per-result grades/checks; an aggregate cannot claim `PASS` if rows fail. When validated with `--manifest`, the report must use the manifest digest and its result IDs must exactly match every manifest question ID; this prevents omitting failed questions from a customer-trust evidence bundle.
+The report also has a required `aggregate` object with mechanical, retrieval, and human-answer pass rates, wrong-repo/unsupported-claim failure counts, and a `PASS`/`RISK`/`BLOCK` verdict. The validator cross-checks those aggregate values against per-result grades/checks; an aggregate cannot claim `PASS` if rows fail. Provider quality metadata may be included as `aggregate.provider_quality` with human-readable `aggregate.risk_reasons`; dev-quality embedding/rerank providers force a `RISK` verdict unless `allow_dev_quality_override=true` records an explicit dev-mode exception. When validated with `--manifest`, the report must use the manifest digest and its result IDs must exactly match every manifest question ID; this prevents omitting failed questions from a customer-trust evidence bundle.
 
 Validate a report by itself:
 

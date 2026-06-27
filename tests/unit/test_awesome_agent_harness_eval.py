@@ -46,6 +46,14 @@ def manifest_with_question(question: dict) -> dict:
     }
 
 
+def dev_provider_health() -> dict:
+    return {
+        "status": "ok",
+        "embedding": {"provider": "hashing", "model": "sourcebrief-hashing-v1", "status": "ok", "dev_quality": True},
+        "rerank": {"provider": "term-overlap", "model": "sourcebrief-term-overlap-v1", "status": "ok", "dev_quality": True},
+    }
+
+
 def negative_context(*, citation_count: int = 0) -> dict:
     citations = [{"path": "near-miss.md"}] if citation_count else []
     return {
@@ -118,6 +126,82 @@ def test_grade_report_accepts_structured_synthesized_answer() -> None:
     assert report["aggregate"]["human_answer_demo_pass_rate"] == 1.0
     assert report["aggregate"]["abstention_pass_rate"] == 1.0
     assert report["aggregate"]["partial_corpus_risk_count"] == 0
+
+
+def test_grade_report_downgrades_pass_for_dev_quality_providers() -> None:
+    module = load_eval_module()
+    manifest = manifest_with_question(
+        {
+            "id": "answered",
+            "query": "What does the runbook say?",
+            "category": "runbook",
+            "customer_job": "understand runbook",
+            "difficulty": "medium",
+            "demo_type": "human-answer-demo",
+            "target_repo": "demo",
+            "target_repos": ["demo"],
+            "expected_result": "pass",
+            "min_citations": 1,
+            "import_type": "full",
+        }
+    )
+    report = module.build_grade_report(
+        manifest,
+        [{"results": [{"id": "answered", "citation_count": 1, "context_chars": 240, "failure_reasons": []}, negative_eval_response()]}],
+        {
+            "answered": {
+                "answer": {"text": "Based on cited context: retry with exponential backoff. [1]"},
+                "citations": [{"path": "runbook.md"}],
+                "context": "x" * 240,
+            },
+            "negative-control": negative_context(),
+        },
+        provider_health=dev_provider_health(),
+    )
+
+    assert report["grade_counts"] == {"PASS": 2, "PARTIAL": 0, "FAIL": 0}
+    assert report["aggregate"]["provider_quality"]["status"] == "dev_quality"
+    assert report["aggregate"]["provider_quality"]["dev_quality"] is True
+    assert report["aggregate"]["provider_quality"]["allow_dev_quality_override"] is False
+    assert report["aggregate"]["verdict"] == "RISK"
+    assert "development_quality_retrieval_provider" in report["aggregate"]["risk_reasons"][0]
+
+
+def test_grade_report_allows_explicit_dev_quality_override() -> None:
+    module = load_eval_module()
+    manifest = manifest_with_question(
+        {
+            "id": "answered",
+            "query": "What does the runbook say?",
+            "category": "runbook",
+            "customer_job": "understand runbook",
+            "difficulty": "medium",
+            "demo_type": "human-answer-demo",
+            "target_repo": "demo",
+            "target_repos": ["demo"],
+            "expected_result": "pass",
+            "min_citations": 1,
+            "import_type": "full",
+        }
+    )
+    report = module.build_grade_report(
+        manifest,
+        [{"results": [{"id": "answered", "citation_count": 1, "context_chars": 240, "failure_reasons": []}, negative_eval_response()]}],
+        {
+            "answered": {
+                "answer": {"text": "Based on cited context: retry with exponential backoff. [1]"},
+                "citations": [{"path": "runbook.md"}],
+                "context": "x" * 240,
+            },
+            "negative-control": negative_context(),
+        },
+        provider_health=dev_provider_health(),
+        allow_dev_quality_providers=True,
+    )
+
+    assert report["aggregate"]["provider_quality"]["allow_dev_quality_override"] is True
+    assert report["aggregate"]["verdict"] == "PASS"
+    assert "development_quality_retrieval_provider" in report["aggregate"]["risk_reasons"][0]
 
 
 def test_grade_report_separates_failed_negative_abstention() -> None:
