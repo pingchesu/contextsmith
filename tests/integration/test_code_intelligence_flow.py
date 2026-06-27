@@ -319,7 +319,7 @@ def test_code_search_respects_retrieval_enabled() -> None:
     assert response.json()["count"] == 0
 
 
-def test_symbol_budget_failure_is_recorded() -> None:
+def test_symbol_budget_partial_snapshot_is_recorded() -> None:
     require_real_services()
     client = TestClient(app)
     headers, workspace_id, project_id = make_project(client, "m4-budget")
@@ -349,11 +349,21 @@ def test_symbol_budget_failure_is_recorded() -> None:
     session.commit()
     run_id = str(run.id)
     session.close()
-    with pytest.raises(RuntimeError, match="symbol budget exceeded"):
-        run_index(run_id)
+
+    run_index(run_id)
+
     response = client.get(f"/workspaces/{workspace_id}/index-runs/{run_id}", headers=headers)
     assert response.status_code == 200
-    assert response.json()["status"] == "failed"
+    run_body = response.json()
+    assert run_body["status"] == "succeeded"
+    assert run_body["symbols_created"] == 2
+    assert run_body["snapshot_id"]
+    resource_response = client.get(f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}", headers=headers)
+    assert resource_response.status_code == 200, resource_response.text
+    resource_body = resource_response.json()
+    assert resource_body["coverage_status"] == "partial"
+    assert resource_body["index_diagnostics"]["index_budget_stats"]["symbol_budget_exceeded"] is True
+    assert "symbol budget exceeded" in " ".join(resource_body["coverage_warnings"])
 
 
 def test_repo_agent_brief_and_retrieval_eval_are_productized(tmp_path) -> None:

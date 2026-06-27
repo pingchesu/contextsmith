@@ -147,6 +147,64 @@ def test_upload_folder_bundle_and_run_index_creates_manifest(
     assert "manual-only" in patch_frequency.json()["detail"]
 
 
+def test_folder_bundle_chunk_budget_partial_manifest_stays_consistent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    require_real_services()
+    monkeypatch.setenv("SOURCEBRIEF_WORK_DIR", str(tmp_path / "work"))
+    client = TestClient(app)
+    token, scope = login_admin(client, monkeypatch, "folder-budget")
+    workspace_id, project_id = scope.split(":")
+    payload = make_zip(
+        {
+            "a.md": b"alpha marker short enough for one chunk",
+            "b.md": ("beta marker\n\n" + "beta body " * 500).encode(),
+            "c.md": ("gamma marker\n\n" + "gamma body " * 500).encode(),
+        }
+    )
+    upload = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources/upload-folder-bundle",
+        headers=auth_headers(token),
+        data={"name": "Budgeted folder bundle", "update_frequency": "manual"},
+        files={"zip_file": ("bundle.zip", payload, "application/zip")},
+    )
+    assert upload.status_code == 202, upload.text
+    body = upload.json()
+    resource_id = body["resource"]["id"]
+    run_id = body["index_run"]["id"]
+    session = get_sessionmaker()()
+    try:
+        resource = session.get(Resource, resource_id)
+        assert resource is not None
+        resource.source_config = {**(resource.source_config or {}), "max_chunks": 1}
+        session.add(resource)
+        session.commit()
+    finally:
+        session.close()
+
+    run_index(run_id)
+
+    session = get_sessionmaker()()
+    try:
+        resource = session.get(Resource, resource_id)
+        assert resource is not None
+        assert resource.status == "active"
+        run = session.get(IndexRun, run_id)
+        assert run is not None
+        assert run.status == "succeeded"
+        assert run.chunks_created == 1
+        manifest_files = session.scalars(select(ResourceManifestFile).where(ResourceManifestFile.resource_id == resource.id)).all()
+        snapshot_files = session.scalars(select(SnapshotFile).where(SnapshotFile.resource_id == resource.id)).all()
+        assert {file.normalized_path for file in manifest_files} == {file.path for file in snapshot_files}
+        assert len(snapshot_files) == 1
+        snapshot = session.get(SourceSnapshot, resource.current_snapshot_id)
+        assert snapshot is not None
+        assert snapshot.meta["index_budget_stats"]["chunk_budget_exceeded"] is True
+    finally:
+        session.close()
+
+
 def test_upload_traversal_zip_rejected_before_resource_create(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from sourcebrief_api.main import app
 from sourcebrief_shared.config import get_settings
 from sourcebrief_shared.db import get_engine
 from sourcebrief_shared.models import IndexRun
+from sourcebrief_worker.jobs import run_index as run_index_job
 
 pytestmark = pytest.mark.integration
 
@@ -172,6 +174,64 @@ def test_agent_context_partial_resource_preserves_corpus_caveat() -> None:
     assert "Caveat:" in body["answer"]["text"]
     assert any("evidence may be partial" in caveat for caveat in body["answer"]["caveats"])
 
+
+
+def test_chunk_budget_exceeded_preserves_queryable_partial_snapshot() -> None:
+    require_real_services()
+    client = TestClient(app)
+    headers, workspace_id, project_id, _resource_id = create_flow(client, "chunk-budget-partial")
+    marker = "chunk-budget-marker-token"
+    long_body = marker + "\n\n" + "\n\n".join(f"paragraph {idx} " + ("long content " * 120) for idx in range(30))
+    resource = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "markdown",
+            "name": "Budget limited document",
+            "uri": "doc://budget-limited",
+            "source_config": {"content": long_body, "max_chunks": 1},
+        },
+        headers=headers,
+    )
+    assert resource.status_code == 201, resource.text
+    resource_id = resource.json()["id"]
+    with Session(get_engine()) as session:
+        index_run = IndexRun(
+            workspace_id=UUID(workspace_id),
+            project_id=UUID(project_id),
+            resource_id=UUID(resource_id),
+            trigger="manual",
+            status="queued",
+        )
+        session.add(index_run)
+        session.commit()
+        run_id = str(index_run.id)
+
+    run_index_job(run_id)
+    completed_response = client.get(f"/workspaces/{workspace_id}/index-runs/{run_id}", headers=headers)
+    assert completed_response.status_code == 200, completed_response.text
+    completed = completed_response.json()
+    assert completed["status"] == "succeeded"
+    assert completed["chunks_created"] == 1
+    assert completed["snapshot_id"]
+
+    resource_read = client.get(f"/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}", headers=headers)
+    assert resource_read.status_code == 200, resource_read.text
+    body = resource_read.json()
+    assert body["queryable"] is True
+    assert body["coverage_status"] == "partial"
+    assert body["index_diagnostics"]["configured_budgets"]["max_chunks"] == 1
+    assert body["index_diagnostics"]["index_budget_stats"]["chunk_budget_exceeded"] is True
+    joined = " ".join(body["coverage_warnings"])
+    assert "chunk budget exceeded" in joined
+    assert "evidence may be partial" in joined
+
+    search = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/search",
+        json={"query": marker, "resource_ids": [resource_id], "top_k": 3},
+        headers=headers,
+    )
+    assert search.status_code == 200, search.text
+    assert search.json()["count"] >= 1
 
 
 def test_agent_context_reports_unindexed_resource_coverage_warning() -> None:
@@ -539,6 +599,18 @@ def test_safe_connectors_upload_redaction_and_validation() -> None:
         headers=headers,
     )
     assert invalid_bound.status_code == 422
+    invalid_index_budget = client.post(
+        f"/workspaces/{workspace_id}/projects/{project_id}/resources",
+        json={
+            "type": "markdown",
+            "name": "Bad Index Budget",
+            "uri": "doc://bad-budget",
+            "source_config": {"content": "body", "max_chunks": 0},
+        },
+        headers=headers,
+    )
+    assert invalid_index_budget.status_code == 422
+    assert "max_chunks" in invalid_index_budget.text
     sanitized_url = client.post(
         f"/workspaces/{workspace_id}/projects/{project_id}/resources",
         json={
