@@ -171,6 +171,27 @@ def test_eval_report_partial_corpus_risk_count_must_match_checks() -> None:
         validate_grade_report(report)
 
 
+def test_eval_report_dev_quality_provider_downgrades_pass_without_override() -> None:
+    report = load_json_file(SAMPLE_REPORT)
+    report["aggregate"]["provider_quality"] = {"dev_quality": True, "allow_dev_quality_override": False, "status": "dev_quality"}
+    report["aggregate"]["risk_reasons"] = ["development_quality_retrieval_provider: embedding=hashing/sourcebrief-hashing-v1"]
+    report["aggregate"]["verdict"] = "PASS"
+
+    with pytest.raises(EvalManifestError, match="verdict"):
+        validate_grade_report(report)
+
+    report["aggregate"]["verdict"] = "RISK"
+    validate_grade_report(report)
+
+
+def test_eval_report_dev_quality_provider_explicit_override_can_pass() -> None:
+    report = load_json_file(SAMPLE_REPORT)
+    report["aggregate"]["provider_quality"] = {"dev_quality": True, "allow_dev_quality_override": True, "status": "dev_quality"}
+    report["aggregate"]["risk_reasons"] = ["development_quality_retrieval_provider: embedding=hashing/sourcebrief-hashing-v1"]
+
+    assert validate_grade_report(report)["grade_counts"]["PASS"] == 2
+
+
 def test_eval_report_manifest_digest_mismatch_fails() -> None:
     manifest = load_json_file(SAMPLE_MANIFEST)
     report = load_json_file(SAMPLE_REPORT)

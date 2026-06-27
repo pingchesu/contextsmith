@@ -229,6 +229,21 @@ def _validate_report_aggregate(aggregate: Any) -> dict[str, Any]:
     verdict = _require_string(aggregate, "verdict", context="report.aggregate")
     if verdict not in VALID_REPORT_VERDICTS:
         raise EvalManifestError(f"report.aggregate.verdict must be one of {sorted(VALID_REPORT_VERDICTS)}")
+    provider_quality = aggregate.get("provider_quality")
+    if provider_quality is not None:
+        if not isinstance(provider_quality, dict):
+            raise EvalManifestError("report.aggregate.provider_quality must be an object")
+        if provider_quality.get("dev_quality") is not None and not isinstance(provider_quality.get("dev_quality"), bool):
+            raise EvalManifestError("report.aggregate.provider_quality.dev_quality must be a boolean")
+        if provider_quality.get("allow_dev_quality_override") is not None and not isinstance(
+            provider_quality.get("allow_dev_quality_override"), bool
+        ):
+            raise EvalManifestError("report.aggregate.provider_quality.allow_dev_quality_override must be a boolean")
+    risk_reasons = aggregate.get("risk_reasons")
+    if risk_reasons is not None and (
+        not isinstance(risk_reasons, list) or any(not isinstance(item, str) or not item for item in risk_reasons)
+    ):
+        raise EvalManifestError("report.aggregate.risk_reasons must be a list of non-empty strings")
     return aggregate
 
 
@@ -290,6 +305,14 @@ def _assert_report_aggregate_matches_results(
     if grade_counts["FAIL"] or wrong_repo_failures or unsupported_claim_failures or abstention_failures:
         expected_verdict = "BLOCK"
     elif grade_counts["PARTIAL"]:
+        expected_verdict = "RISK"
+    provider_quality = aggregate.get("provider_quality")
+    if (
+        expected_verdict == "PASS"
+        and isinstance(provider_quality, dict)
+        and provider_quality.get("dev_quality") is True
+        and provider_quality.get("allow_dev_quality_override") is not True
+    ):
         expected_verdict = "RISK"
     if aggregate["verdict"] != expected_verdict:
         raise EvalManifestError(

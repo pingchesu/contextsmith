@@ -727,7 +727,55 @@ def collect_agent_contexts(client: ApiClient, workspace_id: str, project_id: str
     return contexts
 
 
-def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, Any]], contexts: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _provider_descriptor(name: str, info: Any) -> dict[str, Any]:
+    data = info if isinstance(info, dict) else {}
+    return {
+        "name": name,
+        "provider": data.get("provider"),
+        "model": data.get("model"),
+        "status": data.get("status"),
+        "dev_quality": data.get("dev_quality") is True,
+    }
+
+
+def provider_quality_from_health(provider_health: Any, *, allow_dev_quality_providers: bool = False) -> tuple[dict[str, Any], list[str]]:
+    health = provider_health if isinstance(provider_health, dict) else {}
+    providers = [_provider_descriptor(name, health.get(name)) for name in ("embedding", "rerank")]
+    dev_providers = [item for item in providers if item["dev_quality"]]
+    failed_providers = [item for item in providers if item.get("status") not in (None, "ok")]
+    risk_reasons: list[str] = []
+    if dev_providers:
+        summary = ", ".join(f"{item['name']}={item.get('provider') or 'unknown'}/{item.get('model') or 'unknown'}" for item in dev_providers)
+        risk_reasons.append(f"development_quality_retrieval_provider: {summary}")
+    if failed_providers or health.get("status") not in (None, "ok"):
+        risk_reasons.append("provider_health_not_ok")
+    status = "unknown"
+    if health:
+        if failed_providers or health.get("status") not in (None, "ok"):
+            status = "failed"
+        elif dev_providers:
+            status = "dev_quality"
+        else:
+            status = "production_quality"
+    return (
+        {
+            "status": status,
+            "dev_quality": bool(dev_providers),
+            "allow_dev_quality_override": allow_dev_quality_providers,
+            "providers": providers,
+        },
+        risk_reasons,
+    )
+
+
+def build_grade_report(
+    manifest: dict[str, Any],
+    eval_responses: list[dict[str, Any]],
+    contexts: dict[str, dict[str, Any]],
+    *,
+    provider_health: Any = None,
+    allow_dev_quality_providers: bool = False,
+) -> dict[str, Any]:
     eval_by_id = {result["id"]: result for response in eval_responses for result in response.get("results", [])}
     results = []
     for question in manifest["questions"]:
@@ -816,10 +864,17 @@ def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, 
     wrong_repo_failures = sum(1 for result in results if result["checks"]["wrong_repo_check"] == "fail")
     unsupported_claim_failures = sum(1 for result in results if result["checks"]["citation_support"] == "fail")
     partial_corpus_risk_count = sum(1 for result in results if result["checks"]["partial_corpus_caveat"] == "partial")
+    provider_quality, provider_risk_reasons = provider_quality_from_health(
+        provider_health,
+        allow_dev_quality_providers=allow_dev_quality_providers,
+    )
+    risk_reasons = list(provider_risk_reasons)
     verdict = "PASS"
     if grade_counts["FAIL"] or wrong_repo_failures or unsupported_claim_failures:
         verdict = "BLOCK"
     elif grade_counts["PARTIAL"]:
+        verdict = "RISK"
+    if verdict == "PASS" and provider_quality["dev_quality"] and not allow_dev_quality_providers:
         verdict = "RISK"
     report = {
         "schema_version": "sourcebrief.eval-report.v1",
@@ -833,6 +888,8 @@ def build_grade_report(manifest: dict[str, Any], eval_responses: list[dict[str, 
             "wrong_repo_failures": wrong_repo_failures,
             "unsupported_claim_failures": unsupported_claim_failures,
             "partial_corpus_risk_count": partial_corpus_risk_count,
+            "provider_quality": provider_quality,
+            "risk_reasons": risk_reasons,
             "verdict": verdict,
         },
         "grade_counts": grade_counts,
@@ -927,6 +984,19 @@ def write_markdown_summary(out_dir: Path, manifest: dict[str, Any], imports: lis
         json.dumps(report["aggregate"], indent=2, sort_keys=True),
         "```",
         "",
+        "## Provider quality / launch-readiness risk reasons",
+        "",
+        "```json",
+        json.dumps(
+            {
+                "provider_quality": report.get("aggregate", {}).get("provider_quality"),
+                "risk_reasons": report.get("aggregate", {}).get("risk_reasons", []),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        "```",
+        "",
         "## Per-question grade counts",
         "",
         "```json",
@@ -955,6 +1025,11 @@ def main() -> int:
         "--reuse-existing-evidence",
         action="store_true",
         help="validate existing eval-manifest/eval-report in --output-dir and record this command separately from raw generation",
+    )
+    parser.add_argument(
+        "--allow-dev-quality-providers",
+        action="store_true",
+        help="allow a PASS launch verdict with dev-quality embedding/rerank providers; report still records provider-quality risk metadata",
     )
     args = parser.parse_args()
 
@@ -1000,6 +1075,8 @@ def main() -> int:
     client = ApiClient(args.api_url)
     health = client.request("GET", "/readyz")
     write_json(out_dir / "health-readyz.json", health)
+    provider_health = client.request("GET", "/provider-health")
+    write_json(out_dir / "provider-health.json", provider_health)
     authenticate(client, out_dir)
     workspace, project = create_workspace_project(client, args.slug, out_dir)
     imports = [import_repo(client, workspace["id"], project["id"], repo, out_dir, args.index_timeout) for repo in bank["repos"]]
@@ -1017,7 +1094,13 @@ def main() -> int:
     verify_resource_refs(client, workspace["id"], project["id"], manifest, out_dir)
     eval_responses = run_eval_batches(client, workspace["id"], project["id"], manifest, out_dir)
     contexts = collect_agent_contexts(client, workspace["id"], project["id"], manifest, out_dir)
-    report = build_grade_report(manifest, eval_responses, contexts)
+    report = build_grade_report(
+        manifest,
+        eval_responses,
+        contexts,
+        provider_health=provider_health,
+        allow_dev_quality_providers=args.allow_dev_quality_providers,
+    )
     write_json(out_dir / "eval-report.json", report)
     write_markdown_summary(out_dir, manifest, imports, report, source_fetch)
     capture_run_environment(out_dir, api_url=args.api_url, web_url=args.web_url, argv=sys.argv, source_state=source_state)
