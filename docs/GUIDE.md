@@ -234,6 +234,11 @@ Git resources use `type: "git"`. This is the repo-as-agent path: SourceBrief clo
 
 ### Add a public repo with the CLI
 
+Use the `sourcebrief resource add-repo` command for a name-first CLI import. Keep
+the initial import bounded with `--max-files` and the related max budget flags
+when a repository may be large; SourceBrief surfaces partial coverage instead of
+hiding a capped corpus.
+
 ```bash
 sourcebrief resource add-repo \
   --workspace "Demo" \

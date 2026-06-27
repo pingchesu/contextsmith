@@ -437,9 +437,11 @@ How to use it:
 - Codex: use `codex/AGENTS.md` as the agent instruction file.
 - Any MCP-capable runtime: use `mcp.json` as the config template.
 
-Important boundary: the pack is an adapter. It does not contain the target repo,
-embeddings, indexes, eval history, or secrets. It tells the runtime to call
-SourceBrief.
+Important boundary: the pack is an adapter. It contains runtime instructions
+such as `SKILL.md`, MCP config templates, and project metadata; it intentionally
+excludes the target repo, full source corpus, embeddings, indexes, eval history,
+plaintext bearer tokens, and other secrets. It tells the runtime to call
+SourceBrief rather than answer from a copied local corpus.
 
 ### Option B: reviewed Context Pack Skill Export
 
@@ -471,7 +473,7 @@ sourcebrief skill uninstall --receipt ./sourcebrief-skill-receipt.json
 
 The API also exposes an approved package download at `/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}/download.zip`; draft exports cannot be downloaded or installed.
 
-Generated skill exports are better for repeatable team workflows because they can include package metadata, references, playbooks, citation policy, freshness rules, local install receipts, and leak-scan validation.
+Generated skill exports are better for repeatable team workflows because they can include package metadata, references, playbooks, citation policy, freshness rules, local install receipts, and leak-scan validation. They still do not embed the full source corpus or plaintext bearer tokens; generated artifacts should reference token environment variable names and redact token values in examples, receipts, and validation output.
 
 ## Usage examples by agent
 

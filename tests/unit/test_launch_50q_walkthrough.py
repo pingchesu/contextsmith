@@ -30,6 +30,21 @@ def test_launch_50q_question_bank_has_exactly_50_sanitized_questions() -> None:
     assert "cs_" not in serialized
 
 
+def test_launch_50q_followup_terms_have_launch_doc_anchors() -> None:
+    """Guard the answer-quality follow-ups opened from the screenshot-backed run."""
+    guide = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")
+    runtime_usage = (ROOT / "docs" / "AGENT_RUNTIME_USAGE.md").read_text(encoding="utf-8")
+    runtime_plan = (ROOT / "docs" / "RUNTIME_INSTALL_PLAN.md").read_text(encoding="utf-8")
+
+    assert "sourcebrief resource add-repo" in guide
+    assert "--max-files" in guide
+    assert "full source corpus" in runtime_usage
+    assert "SKILL.md" in runtime_usage
+    assert "redact token values" in runtime_usage
+    assert "--redact-token" in runtime_plan
+    assert "plaintext bearer tokens" in runtime_plan
+
+
 def test_launch_50q_redaction_strips_tokens_passwords_and_ids() -> None:
     module = load_module()
     redacted = module.redact(

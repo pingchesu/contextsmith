@@ -188,7 +188,7 @@ sourcebrief --json token revoke --workspace "Demo Workspace" --token-id "$TOKEN_
 
 ## Trust boundaries
 
-SourceBrief provides cited context. It is not the coding agent, editor, deployment tool, or production executor. Local runtime config files, receipts, cached context, downloaded/generated agent packs, and validator output can reveal project names, endpoint URLs, resource IDs, paths, snippets, and token environment variable names; treat them as sensitive workspace artifacts even though they should not contain plaintext bearer tokens.
+SourceBrief provides cited context. It is not the coding agent, editor, deployment tool, or production executor. Local runtime config files, receipts, cached context, downloaded/generated agent packs, and validator output can reveal project names, endpoint URLs, resource IDs, paths, snippets, and token environment variable names; treat them as sensitive workspace artifacts even though they should not contain plaintext bearer tokens. When commands or examples must show runtime auth, use environment-variable references and `--redact-token`/redacted output so plaintext bearer tokens are not written into generated artifacts.
 
 Runtime install plans preserve these boundaries:
 
