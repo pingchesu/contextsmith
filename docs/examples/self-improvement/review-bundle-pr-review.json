@@ -1,0 +1,127 @@
+{
+  "schema_version": "sourcebrief.review-bundle.v1",
+  "bundle_id": "rb-demo-pr-review-001",
+  "kind": "pr_review",
+  "created_at": "2026-06-28T17:06:00Z",
+  "input": {
+    "original_query": "Review PR #174 for self-improvement architecture safety and issue sequencing.",
+    "task_brief": "Review a docs-only PR and produce structured findings without reading all Slack messages.",
+    "acceptance_criteria": [
+      "Reviewer checks safety boundaries and replay metadata.",
+      "Reviewer reports blockers/majors only."
+    ],
+    "non_goals": [
+      "Do not post a GitHub review comment from this fixture.",
+      "Do not mutate docs or issues from the reviewer run."
+    ],
+    "user_corrections": [
+      "Review should be an autonomous reviewer over durable artifacts, not a day-long transcript pass."
+    ]
+  },
+  "output": {
+    "summary": "Reviewer found security sequencing and replay metadata gaps that should be patched before merge.",
+    "body": "The reviewer proposed adding backend egress policy, completeness status, early security baseline, and golden fixtures before bundle capture and gate implementation.",
+    "claim_ids": ["claim-egress-policy", "claim-security-before-capture", "claim-golden-fixtures-before-gate"]
+  },
+  "scope": {
+    "workspace_id": "workspace-demo-public",
+    "project_id": "project-sourcebrief-docs",
+    "resource_ids": ["resource-pr-174-diff", "resource-self-improvement-docs"],
+    "context_pack_key": "sourcebrief-docs"
+  },
+  "security": {
+    "sensitivity": "public",
+    "retention_days": 14,
+    "allowed_reviewer_backends": ["local", "mock"],
+    "reviewer_backend": "mock",
+    "egress_decision": "local_only",
+    "external_reviewer_opt_in": false,
+    "purge_derived_artifacts": true,
+    "completeness": "redacted_partial",
+    "redaction_counts": {
+      "local_path": 1
+    },
+    "scope": {
+      "workspace_id": "workspace-demo-public",
+      "project_id": "project-sourcebrief-docs",
+      "resource_ids": ["resource-pr-174-diff", "resource-self-improvement-docs"],
+      "context_pack_key": "sourcebrief-docs"
+    }
+  },
+  "runtime": {
+    "sourcebrief_commit": "7aba026dcd9200e4a27464f7508b20c741d2aa10",
+    "runtime": "github-pr-review",
+    "model_backend": "mock",
+    "model_name": "mock-reviewer",
+    "prompt_version": "pr-review-bundle-v1",
+    "skill_or_agent_pack_version": null,
+    "retrieval_profile": "changed-docs",
+    "top_k": 8,
+    "rerank_enabled": false,
+    "max_chars": 12000
+  },
+  "source_refs": [
+    {
+      "resource_id": "resource-self-improvement-docs",
+      "source_snapshot_id": "snapshot-docs-main-7aba026",
+      "commit_sha": "7aba026dcd9200e4a27464f7508b20c741d2aa10",
+      "path": "docs/SELF_IMPROVEMENT.md",
+      "line_start": 158,
+      "line_end": 179,
+      "content_hash": "sha256:demo-security-model",
+      "title": "Safety and permission model"
+    },
+    {
+      "resource_id": "resource-pr-174-diff",
+      "source_snapshot_id": "snapshot-pr-174-head",
+      "commit_sha": "7c4b9316e5cb91260cb8410197abbae178c2f02b",
+      "path": "PR-174.diff",
+      "line_start": 1,
+      "line_end": 120,
+      "content_hash": "sha256:demo-pr-174-diff",
+      "title": "PR #174 docs diff"
+    }
+  ],
+  "citations": [
+    {
+      "citation_id": "cite-security-model",
+      "label": "[1]",
+      "source_ref": {
+        "resource_id": "resource-self-improvement-docs",
+        "source_snapshot_id": "snapshot-docs-main-7aba026",
+        "commit_sha": "7aba026dcd9200e4a27464f7508b20c741d2aa10",
+        "path": "docs/SELF_IMPROVEMENT.md",
+        "line_start": 158,
+        "line_end": 179,
+        "content_hash": "sha256:demo-security-model",
+        "title": "Safety and permission model"
+      },
+      "snippet": "Each bundle must carry sensitivity, retention, purge scope, allowed reviewer backend, and egress decision metadata.",
+      "snippet_hash": "sha256:demo-snippet-security-model",
+      "supports_claim_ids": ["claim-egress-policy"]
+    }
+  ],
+  "tool_proof": [
+    {
+      "proof_id": "proof-pr-diff-check",
+      "kind": "git",
+      "command": ["git", "diff", "--check"],
+      "status": "passed",
+      "exit_code": 0,
+      "stdout_excerpt": "no whitespace errors",
+      "stderr_excerpt": null,
+      "artifact_uri": null
+    }
+  ],
+  "verification_logs": [
+    {
+      "command": "changed-doc relative link check",
+      "status": "passed",
+      "output_excerpt": "changed-doc links ok",
+      "artifact_uri": null
+    }
+  ],
+  "reviewer_notes": [
+    "Fixture intentionally records redacted_partial because one local development path was removed before committing public evidence."
+  ]
+}
