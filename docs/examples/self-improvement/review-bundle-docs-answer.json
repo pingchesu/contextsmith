@@ -1,0 +1,111 @@
+{
+  "schema_version": "sourcebrief.review-bundle.v1",
+  "bundle_id": "rb-demo-docs-answer-001",
+  "kind": "answer",
+  "created_at": "2026-06-28T17:05:00Z",
+  "input": {
+    "original_query": "How does SourceBrief prevent self-improvement from silently changing production behavior?",
+    "task_brief": "Answer from the committed self-improvement docs using cited evidence.",
+    "acceptance_criteria": [
+      "Answer cites the self-improvement safety boundary.",
+      "Answer does not claim an implemented reviewer runner before it exists."
+    ],
+    "non_goals": [
+      "Do not inspect raw chat transcripts.",
+      "Do not run an external reviewer backend."
+    ],
+    "user_corrections": []
+  },
+  "output": {
+    "summary": "SourceBrief stages proposed improvements and requires explicit adoption rather than silent mutation.",
+    "body": "The self-improvement loop uses review bundles, reviewer findings, proposals, validation gates, and staged adoption. The docs explicitly state that prompts, skills, runtime config, docs, and code must not change silently.",
+    "claim_ids": ["claim-staged-adoption", "claim-no-silent-mutation"]
+  },
+  "scope": {
+    "workspace_id": "workspace-demo-public",
+    "project_id": "project-sourcebrief-docs",
+    "resource_ids": ["resource-self-improvement-docs"],
+    "context_pack_key": "sourcebrief-docs"
+  },
+  "security": {
+    "sensitivity": "public",
+    "retention_days": 30,
+    "allowed_reviewer_backends": ["local", "mock"],
+    "reviewer_backend": "mock",
+    "egress_decision": "local_only",
+    "external_reviewer_opt_in": false,
+    "purge_derived_artifacts": true,
+    "completeness": "complete",
+    "redaction_counts": {},
+    "scope": {
+      "workspace_id": "workspace-demo-public",
+      "project_id": "project-sourcebrief-docs",
+      "resource_ids": ["resource-self-improvement-docs"],
+      "context_pack_key": "sourcebrief-docs"
+    }
+  },
+  "runtime": {
+    "sourcebrief_commit": "d88c4440f051946535d529ff6d7a15086c85f732",
+    "runtime": "cli",
+    "model_backend": "mock",
+    "model_name": "mock-reviewer",
+    "prompt_version": "self-improvement-docs-v1",
+    "skill_or_agent_pack_version": null,
+    "retrieval_profile": "lexical-demo",
+    "top_k": 5,
+    "rerank_enabled": false,
+    "max_chars": 4000
+  },
+  "source_refs": [
+    {
+      "resource_id": "resource-self-improvement-docs",
+      "source_snapshot_id": "snapshot-docs-main-d88c444",
+      "commit_sha": "d88c4440f051946535d529ff6d7a15086c85f732",
+      "path": "docs/SELF_IMPROVEMENT.md",
+      "line_start": 126,
+      "line_end": 139,
+      "content_hash": "sha256:demo-staged-adoption",
+      "title": "Staged adoption"
+    }
+  ],
+  "citations": [
+    {
+      "citation_id": "cite-staged-adoption",
+      "label": "[1]",
+      "source_ref": {
+        "resource_id": "resource-self-improvement-docs",
+        "source_snapshot_id": "snapshot-docs-main-d88c444",
+        "commit_sha": "d88c4440f051946535d529ff6d7a15086c85f732",
+        "path": "docs/SELF_IMPROVEMENT.md",
+        "line_start": 126,
+        "line_end": 139,
+        "content_hash": "sha256:demo-staged-adoption",
+        "title": "Staged adoption"
+      },
+      "snippet": "No SourceBrief runtime, generated skill, prompt, docs, or code path should change silently.",
+      "snippet_hash": "sha256:demo-snippet-staged-adoption",
+      "supports_claim_ids": ["claim-staged-adoption", "claim-no-silent-mutation"]
+    }
+  ],
+  "tool_proof": [
+    {
+      "proof_id": "proof-doc-link-check",
+      "kind": "test",
+      "command": ["python3", "scripts/check_quickstart_prereqs.py"],
+      "status": "passed",
+      "exit_code": 0,
+      "stdout_excerpt": "[PASS] docker compose: Docker Compose version",
+      "stderr_excerpt": null,
+      "artifact_uri": null
+    }
+  ],
+  "verification_logs": [
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "output_excerpt": "no whitespace errors",
+      "artifact_uri": null
+    }
+  ],
+  "reviewer_notes": []
+}
