@@ -33,6 +33,7 @@ from sourcebrief_shared.review_runner import (
     run_review_bundle_path,
     write_reviewer_report,
 )
+from sourcebrief_shared.staged_adoption import stage_regression_proposal
 from sourcebrief_shared.validation_gate import (
     validate_regression_proposal_file,
     write_validation_gate_result,
@@ -1254,6 +1255,26 @@ def cmd_review_gate(_client: SourceBriefClient, args: argparse.Namespace) -> Any
     return result.model_dump(mode="json")
 
 
+def cmd_review_stage(_client: SourceBriefClient, args: argparse.Namespace) -> Any:
+    try:
+        receipt = stage_regression_proposal(
+            proposal_path=args.proposal,
+            gate_result_path=args.gate_result,
+            out_dir=args.out_dir,
+        )
+    except (OSError, ValueError) as exc:
+        raise SourceBriefCliError(str(exc)) from exc
+    return {
+        "status": "staged",
+        "stage_dir": receipt.stage_dir,
+        "receipt_path": str(Path(receipt.stage_dir) / "receipt.json"),
+        "patch_path": receipt.patch_path,
+        "apply_command": receipt.apply_command,
+        "rollback_command": receipt.rollback_command,
+        "receipt": receipt.model_dump(mode="json"),
+    }
+
+
 def _runtime_plan_request(client: SourceBriefClient, args: argparse.Namespace) -> dict[str, Any]:
     _require_scope(args)
     plan = client.request(
@@ -1831,6 +1852,11 @@ def build_parser() -> argparse.ArgumentParser:
     review_gate.add_argument("--proposal", required=True, help="path to a sourcebrief.regression-proposal.v1 JSON file")
     review_gate.add_argument("--result-out", help="write the sourcebrief.validation-gate-result.v1 artifact to this path")
     review_gate.set_defaults(func=cmd_review_gate)
+    review_stage = review.add_parser("stage", help="stage an accepted proposal as a human-reviewable patch and receipt")
+    review_stage.add_argument("--proposal", required=True, help="path to a sourcebrief.regression-proposal.v1 JSON file")
+    review_stage.add_argument("--gate-result", required=True, help="path to an accepted sourcebrief.validation-gate-result.v1 JSON file")
+    review_stage.add_argument("--out-dir", required=True, help="directory where staged artifacts should be written")
+    review_stage.set_defaults(func=cmd_review_stage)
 
     runtime = sub.add_parser("runtime", help="agent runtime install and validation commands").add_subparsers(dest="runtime_command")
     runtime_plan = runtime.add_parser("plan", help="generate a dry-run runtime install plan")

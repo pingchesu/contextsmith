@@ -671,6 +671,56 @@ def test_cli_review_gate_invalid_schema_writes_rejected_result(monkeypatch, caps
     assert saved["checks"]["schema_valid"] == "fail"
 
 
+def test_cli_review_stage_writes_receipt_patch_and_does_not_login(monkeypatch, capsys, tmp_path):
+    patch_client(monkeypatch)
+    monkeypatch.setenv("SOURCEBRIEF_CONFIG_PATH", str(tmp_path / "sourcebrief-config.json"))
+    monkeypatch.setenv("SOURCEBRIEF_ADMIN_EMAIL", "admin@sourcebrief.local")
+    monkeypatch.setenv("SOURCEBRIEF_ADMIN_PASSWORD", "local-password")
+    proposal_path = Path(__file__).resolve().parents[2] / "docs" / "examples" / "self-improvement" / "regression-proposal-example.json"
+    gate_path = Path(__file__).resolve().parents[2] / "docs" / "examples" / "self-improvement" / "validation-gate-result-example.json"
+    out_dir = tmp_path / "staged"
+
+    assert cli_main([
+        "--json",
+        "review",
+        "stage",
+        "--proposal",
+        str(proposal_path),
+        "--gate-result",
+        str(gate_path),
+        "--out-dir",
+        str(out_dir),
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "staged"
+    assert payload["apply_command"].startswith("git apply ")
+    assert payload["rollback_command"].startswith("git apply -R ")
+    assert Path(payload["receipt_path"]).exists()
+    assert Path(payload["patch_path"]).exists()
+    assert FakeClient.instances[-1].calls == []
+
+
+def test_cli_review_stage_rejects_rejected_gate(monkeypatch, capsys, tmp_path):
+    patch_client(monkeypatch)
+    proposal_path = Path(__file__).resolve().parents[2] / "docs" / "examples" / "self-improvement" / "regression-proposal-example.json"
+    gate_path = tmp_path / "gate-rejected.json"
+    gate = json.loads((Path(__file__).resolve().parents[2] / "docs" / "examples" / "self-improvement" / "validation-gate-result-example.json").read_text(encoding="utf-8"))
+    gate["decision"] = "reject"
+    gate_path.write_text(json.dumps(gate), encoding="utf-8")
+
+    assert cli_main([
+        "review",
+        "stage",
+        "--proposal",
+        str(proposal_path),
+        "--gate-result",
+        str(gate_path),
+        "--out-dir",
+        str(tmp_path / "staged"),
+    ]) == 1
+    assert "only accepted gate results" in capsys.readouterr().err
+
+
 def test_explicit_workspace_id_does_not_inherit_saved_project(monkeypatch, capsys, tmp_path):
     patch_client(monkeypatch)
     config_path = tmp_path / "sourcebrief-config.json"
