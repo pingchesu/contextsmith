@@ -565,6 +565,18 @@ An installed agent is not considered ready until:
 
 This skill is read-only. Do not perform production, cloud, repository, or deployment mutations based only on generated skill text. Ask for explicit scoped approval and use typed tools.
 
+## Self-improvement review loop boundary
+
+If a SourceBrief answer, PR review, or generated runtime instruction looks wrong, convert it into bounded review artifacts instead of editing this skill from memory:
+
+1. Capture or load a `sourcebrief.review-bundle.v1` artifact.
+2. Run `sourcebrief review run` to produce a reviewer report with evidence-linked findings.
+3. Convert accepted findings with `sourcebrief review propose` and `sourcebrief review gate`.
+4. Use `sourcebrief review stage` to create a human-reviewable patch/receipt.
+5. Inspect `sourcebrief review history list/show` before changing product docs, generated skills, runtime packs, prompts, or code.
+
+Never treat one reviewer opinion as a permanent prompt/skill rule. Runtime-pack wording changes must remain staged, reviewable, and rollbackable; installed runtime configs are not patched by this loop.
+
 ## Failure modes
 
 - SourceBrief unavailable: report degraded context; do not guess.
@@ -1104,6 +1116,9 @@ def _validate_files(files: list[dict[str, Any]], skill_content: str) -> dict[str
         "references/task-playbooks/onboarding.md",
         "citations",
         "Mutation boundary",
+        "Self-improvement review loop boundary",
+        "sourcebrief.review-bundle.v1",
+        "sourcebrief review stage",
     ]
     for needle in required_text:
         if needle not in skill_content:

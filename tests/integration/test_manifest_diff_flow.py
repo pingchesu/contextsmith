@@ -722,6 +722,10 @@ def test_skill_export_generation_approval_download_scope_and_purge(monkeypatch: 
     assert "CLI fallback/toolbelt" in files_by_path["SKILL.md"]["content"]
     assert "Installed-runtime acceptance check" in files_by_path["SKILL.md"]["content"]
     assert "sourcebrief doctor" in files_by_path["SKILL.md"]["content"]
+    assert "Self-improvement review loop boundary" in files_by_path["SKILL.md"]["content"]
+    assert "sourcebrief.review-bundle.v1" in files_by_path["SKILL.md"]["content"]
+    assert "sourcebrief review stage" in files_by_path["SKILL.md"]["content"]
+    assert "installed runtime configs are not patched by this loop" in files_by_path["SKILL.md"]["content"]
     assert "sourcebrief.read_section" in joined
     assert "references/data-structure.md" in joined
     assert "references/resource-map.md" in joined
