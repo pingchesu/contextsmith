@@ -123,6 +123,51 @@ Non-goals:
 - No replacement for running tests on the real checkout.
 - No source-control mutation from the recipe itself.
 
+## Recipe: review-agent self-improvement
+
+**Promise:** turn a cited answer or PR review artifact into a bounded review loop that can create a regression proposal without silently changing SourceBrief behavior.
+
+Sources/artifacts:
+
+- A public-safe review bundle from `sourcebrief ask --review-bundle-out`, `sourcebrief quickstart-demo --review-bundle-out`, or `sourcebrief review pr-bundle`.
+- A local reviewer report from `sourcebrief review run`.
+- A regression proposal from `sourcebrief review propose`.
+- A validation result from `sourcebrief review gate`.
+- A staged receipt from `sourcebrief review stage`.
+
+First questions:
+
+- "Did the cited answer make a claim unsupported by evidence?"
+- "Did a PR review miss a scope, test, docs, or safety boundary?"
+- "Can this failure become a deterministic regression check?"
+- "Did the validation gate accept or reject the proposed learning?"
+
+### Copy/paste start
+
+1. Run the stitched local proof: `uv run sourcebrief review mvp-smoke --out-dir ./artifacts/self-improvement-mvp-smoke`.
+2. Inspect history: `uv run sourcebrief review history list --dir ./artifacts/self-improvement-mvp-smoke`.
+3. Show the proposal or gate artifact: `uv run sourcebrief review history show <artifact-id> --dir ./artifacts/self-improvement-mvp-smoke`.
+4. If a staged patch exists, read its receipt before applying anything; applying remains a separate developer/PR action.
+
+Good evidence includes:
+
+- Review bundle with citations, source refs, tool proof, and security metadata.
+- Reviewer report with blocker/major findings tied to evidence refs.
+- Proposal and gate result linked back to the source bundle/report/finding.
+- Staged receipt with explicit apply and rollback commands.
+
+Agent pack behavior:
+
+- Treat reviewer findings as proposals, not permanent lessons.
+- Never rewrite prompts, skills, runtime packs, docs, or code from one review opinion.
+- Require validation gate evidence and staged adoption before product-facing claims change.
+
+Non-goals:
+
+- No raw all-day chat transcript review.
+- No recurring optimizer claim.
+- No silent self-mutation or automatic GitHub merge/comment.
+
 ## Recipe: incident runbook
 
 **Promise:** turn runbooks and source into an on-call evidence assistant.

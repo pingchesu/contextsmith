@@ -106,6 +106,31 @@ optional code symbols, and a token budget hint.
 
 That is the product bar: an agent can act on the answer because every claim points back to source.
 
+## Self-improvement without silent mutation
+
+SourceBrief now ships a local, artifact-based self-improvement loop for reviewing its own cited answers and PR-review evidence:
+
+```text
+cited answer or PR evidence
+    -> review bundle
+    -> local reviewer report with findings
+    -> regression proposal
+    -> deterministic validation gate
+    -> staged patch/receipt
+    -> review history
+```
+
+This is not an automatic optimizer and it does not rewrite prompts, skills, runtime packs, docs, or code by itself. The shipped path writes bounded JSON artifacts and human-reviewable staged patches; applying a change remains an explicit developer/PR action.
+
+Try the public-safe smoke path:
+
+```bash
+uv run sourcebrief review mvp-smoke --out-dir ./artifacts/self-improvement-mvp-smoke
+uv run sourcebrief review history list --dir ./artifacts/self-improvement-mvp-smoke
+```
+
+Start with [Self-improvement MVP smoke](docs/SELF_IMPROVEMENT_MVP_SMOKE.md), [Review bundle runner](docs/REVIEW_BUNDLE_RUNNER.md), [Validation gate](docs/VALIDATION_GATE.md), and [Staged adoption](docs/STAGED_ADOPTION.md).
+
 ## How SourceBrief works
 
 ```text
@@ -176,6 +201,7 @@ For runtime setup, prompts, token scopes, remote-code safety, generated skills, 
 | Operate or debug the local stack | [Operations](docs/OPERATIONS.md) |
 | Check alpha readiness and limits | [Project status](docs/STATUS.md) |
 | Review real evaluation examples | [Awesome Agent Harness 50-question example](examples/awesome-agent-harness-50q/README.md) |
+| Run the self-improvement proof path | [Self-improvement MVP smoke](docs/SELF_IMPROVEMENT_MVP_SMOKE.md) |
 | Pick a product workflow | [Recipes](docs/RECIPES.md) |
 | Use SourceBrief with a local agent | [Local-agent runtime example](examples/use-sourcebrief-with-local-agent/README.md) |
 
