@@ -55,15 +55,19 @@ SourceBrief self-improvement does **not** mean:
 
 A review bundle is the unit of review. It replaces raw chat review.
 
-A bundle should contain enough information for a reviewer agent to reproduce the reasoning context without reading the whole conversation:
+A bundle should contain enough information for a reviewer agent to reproduce or validate the reasoning context without reading the whole conversation:
 
-- task brief and acceptance criteria;
+- original user query, task prompt, or PR/demo brief;
+- task brief, acceptance criteria, and explicit non-goals;
 - final output, answer, PR body, docs diff, or demo result;
-- citations, source/resource refs, snapshot IDs, paths, line/section ranges, and content hashes where available;
-- tool proof such as CLI output, test output, API response, MCP call result, or browser evidence;
+- runtime, model/backend, prompt version, generated skill/agent-pack version, and reviewer policy version where applicable;
+- retrieval profile, top-k, rerank flags, context-pack key, and other answer-generation settings;
+- immutable source snapshot IDs, commit SHAs, paths, line/section ranges, and content hashes where available;
+- citations, source/resource refs, and machine-readable citation metadata;
+- sanitized command args, environment metadata, and tool proof such as CLI output, test output, API response, MCP call result, or browser evidence;
 - workspace/project/resource/context-pack scope;
 - user correction or reviewer feedback, if present;
-- redaction metadata and retention class.
+- redaction metadata, retention class, allowed reviewer backend policy, and bundle completeness status: `complete`, `redacted_partial`, or `insufficient_evidence`.
 
 ### Reviewer agent
 
@@ -162,6 +166,10 @@ Self-improvement artifacts must preserve SourceBrief's existing trust boundaries
 - A reviewer can only inspect evidence allowed by the originating workspace/project/resource scope.
 - A bundle should store references and redacted snippets, not full unbounded private corpora by default.
 - Runtime tokens, credentials, bearer tokens, API keys, local private paths, and raw secrets must be redacted.
+- Each bundle must carry sensitivity, retention, purge scope, allowed reviewer backend, and egress decision metadata.
+- Private bundle evidence must not be sent to an unapproved external LLM or reviewer backend. External reviewers are opt-in by workspace/project policy.
+- Every reviewer run must record backend/model identity, redaction status, egress decision, reviewer policy version, and artifact retention class.
+- Purge/delete must cover derived artifacts too: bundle, finding, proposal, gate result, staged patch/receipt, and observability summaries.
 - Improvements that change docs, recipes, generated skills, prompts, runtime config, or code must go through staging and PR review.
 - Production mutation, deployment, restart, or external publication remains out of scope unless separately approved.
 
@@ -200,46 +208,56 @@ Every review run should expose:
 
 Tracking issue: [#157](https://github.com/pingchesu/sourcebrief/issues/157)
 
-### M2 — Bundle schema
+### M2 — Security baseline and bundle schema
 
-- Define schema and examples.
-- Validate sample bundles.
-- Redact public artifacts.
+- Define the artifact sensitivity, redaction, retention, permission-scope, purge, and reviewer-egress baseline before any durable capture path writes bundles.
+- Define schema and examples against that safety baseline.
+- Validate sample bundles and public-safe examples.
 
-Issue: [#159](https://github.com/pingchesu/sourcebrief/issues/159)
+Issues: [#169](https://github.com/pingchesu/sourcebrief/issues/169), [#159](https://github.com/pingchesu/sourcebrief/issues/159)
 
-### M3 — Bundle capture
+### M3 — Minimum fixtures, taxonomy, and citation checks
 
-- Persist bundles from `sourcebrief ask` and demo paths.
-- Include citations and tool proof.
+- Define the finding taxonomy and output schema before the reviewer runner emits reports.
+- Add minimum golden fixtures: unsupported claim, citation mismatch, safe passing answer, and rejected proposal.
+- Add the deterministic citation-support fixture/check needed by the reviewer runner and validation gate.
 
-Issue: [#160](https://github.com/pingchesu/sourcebrief/issues/160)
+Issues: [#162](https://github.com/pingchesu/sourcebrief/issues/162), [#172](https://github.com/pingchesu/sourcebrief/issues/172), [#167](https://github.com/pingchesu/sourcebrief/issues/167)
 
-### M4 — Reviewer runner
+### M4 — Bundle capture and reviewer runner
 
-- Run reviewer agent over bundles.
-- Emit structured findings.
+- Persist bundles from `sourcebrief ask` and demo paths only after the M2 safety/schema baseline exists.
+- Include citations, replay-critical metadata, completeness status, and tool proof.
+- Run the reviewer agent over bundles and emit findings using the M3 taxonomy.
 
-Issues: [#161](https://github.com/pingchesu/sourcebrief/issues/161), [#162](https://github.com/pingchesu/sourcebrief/issues/162)
+Issues: [#160](https://github.com/pingchesu/sourcebrief/issues/160), [#161](https://github.com/pingchesu/sourcebrief/issues/161)
 
-### M5 — Proposals and gate
+### M5 — Proposals, gate, and staged adoption
 
 - Convert findings to regression proposals.
 - Validate candidate improvements before staging.
+- Do not rely only on an LLM judge: the gate must include deterministic or mock-reviewer golden-suite checks from #172.
+- Stage accepted proposals with receipts and explicit apply/adopt boundaries.
 
-Issues: [#163](https://github.com/pingchesu/sourcebrief/issues/163), [#164](https://github.com/pingchesu/sourcebrief/issues/164), [#165](https://github.com/pingchesu/sourcebrief/issues/165)
+Issues: [#163](https://github.com/pingchesu/sourcebrief/issues/163), [#164](https://github.com/pingchesu/sourcebrief/issues/164), [#165](https://github.com/pingchesu/sourcebrief/issues/165), [#172](https://github.com/pingchesu/sourcebrief/issues/172)
 
-### M6 — Integrations and product proof
+### M6 — End-to-end MVP proof and observability
 
-- PR review bundle integration.
-- Citation-support checks.
-- Review history and observability.
-- Runtime-pack learning proposals.
-- Product docs after MVP proof.
+- Stitch the component issues into one vertical smoke path.
+- Show bundle -> finding -> proposal -> gate -> staged artifact without silent mutation.
+- Make review/regression history inspectable.
 
-Issues: [#166](https://github.com/pingchesu/sourcebrief/issues/166), [#167](https://github.com/pingchesu/sourcebrief/issues/167), [#168](https://github.com/pingchesu/sourcebrief/issues/168), [#171](https://github.com/pingchesu/sourcebrief/issues/171), [#173](https://github.com/pingchesu/sourcebrief/issues/173)
+Issues: [#168](https://github.com/pingchesu/sourcebrief/issues/168), [#175](https://github.com/pingchesu/sourcebrief/issues/175)
 
-### M7 — Later sleep/replay loop
+### M7 — Product integrations after MVP proof
+
+- Add PR review bundle integration.
+- Add runtime-pack learning proposal support as a gated/staged target surface.
+- Productize the story in README/recipes only after the MVP, security baseline, and golden fixtures have evidence.
+
+Issues: [#166](https://github.com/pingchesu/sourcebrief/issues/166), [#173](https://github.com/pingchesu/sourcebrief/issues/173), [#171](https://github.com/pingchesu/sourcebrief/issues/171)
+
+### M8 — Later sleep/replay loop
 
 - Mine recurring validated failures from review artifacts.
 - Replay against held-out bundles.
@@ -288,3 +306,4 @@ Revisit this design if:
 - [#171](https://github.com/pingchesu/sourcebrief/issues/171) product docs
 - [#172](https://github.com/pingchesu/sourcebrief/issues/172) golden regression suite
 - [#173](https://github.com/pingchesu/sourcebrief/issues/173) runtime-pack integration
+- [#175](https://github.com/pingchesu/sourcebrief/issues/175) end-to-end MVP smoke path
