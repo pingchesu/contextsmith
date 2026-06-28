@@ -74,10 +74,24 @@ def _status_for_finding(finding: ReviewerFinding) -> ProposalStatus:
 
 def proposal_from_finding(report: ReviewerReport, finding: ReviewerFinding, *, owner: str = "unassigned") -> RegressionProposal:
     status = _status_for_finding(finding)
+    target_surface = _target_surface_for_finding(finding)
     proposed_check = (
         f"Reproduce finding `{finding.finding_id}` for bundle `{report.bundle_id}` and assert that `{finding.type}` "
         f"does not recur after applying the suggested fix: {finding.suggested_fix}"
     )
+    acceptance = [
+        f"The regression check fails on the source finding `{finding.finding_id}` before the fix.",
+        "The check passes after the smallest scoped fix or remains explicitly rejected with rationale.",
+        "Evidence refs remain tied to the original review bundle/report.",
+    ]
+    if target_surface == "runtime_pack":
+        proposed_check += " Runtime-pack changes must be staged through validation gate and staged adoption, not applied to installed runtime configs."
+        acceptance.extend(
+            [
+                "Generated skill/agent-pack output keeps the SourceBrief review/citation/safety contract.",
+                "Runtime-pack wording changes are reviewable artifacts and do not patch installed runtime configs silently.",
+            ]
+        )
     negative_learning = finding.claim if status == "rejected" else None
     rationale = finding.impact if status == "proposed" else f"Rejected as durable learning: {finding.impact}"
     return RegressionProposal(
@@ -95,13 +109,9 @@ def proposal_from_finding(report: ReviewerReport, finding: ReviewerFinding, *, o
         reviewer_lens=finding.reviewer_lens,
         proposal_eligibility=finding.proposal_eligibility,
         negative_learning=negative_learning,
-        target_surface=_target_surface_for_finding(finding),
+        target_surface=target_surface,
         proposed_check=proposed_check,
-        acceptance=[
-            f"The regression check fails on the source finding `{finding.finding_id}` before the fix.",
-            "The check passes after the smallest scoped fix or remains explicitly rejected with rationale.",
-            "Evidence refs remain tied to the original review bundle/report.",
-        ],
+        acceptance=acceptance,
         fixture_refs=[f"finding:{finding.finding_id}"],
         bundle_refs=[report.bundle_id],
         evidence_refs=finding.evidence_refs,
