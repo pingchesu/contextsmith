@@ -161,7 +161,7 @@ Avoid default review of every message.
 
 ## Safety and permission model
 
-Self-improvement artifacts must preserve SourceBrief's existing trust boundaries:
+Self-improvement artifacts must preserve SourceBrief's existing trust boundaries. The detailed implementation baseline is [Self-improvement artifact security](SELF_IMPROVEMENT_SECURITY.md).
 
 - A reviewer can only inspect evidence allowed by the originating workspace/project/resource scope.
 - A bundle should store references and redacted snippets, not full unbounded private corpora by default.
@@ -301,7 +301,7 @@ Revisit this design if:
 - [#166](https://github.com/pingchesu/sourcebrief/issues/166) GitHub PR integration
 - [#167](https://github.com/pingchesu/sourcebrief/issues/167) citation support checks
 - [#168](https://github.com/pingchesu/sourcebrief/issues/168) history and observability
-- [#169](https://github.com/pingchesu/sourcebrief/issues/169) security, privacy, retention
+- [#169](https://github.com/pingchesu/sourcebrief/issues/169) security, privacy, retention; implementation baseline: [Self-improvement artifact security](SELF_IMPROVEMENT_SECURITY.md)
 - [#170](https://github.com/pingchesu/sourcebrief/issues/170) nightly sleep/replay
 - [#171](https://github.com/pingchesu/sourcebrief/issues/171) product docs
 - [#172](https://github.com/pingchesu/sourcebrief/issues/172) golden regression suite
