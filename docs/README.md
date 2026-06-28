@@ -52,6 +52,7 @@ Use this page as a map. New readers should stay in the **primary path** first; s
 | [Self-improvement](SELF_IMPROVEMENT.md) | Product architecture | Review bundles, autonomous reviewer agents, regression proposals, validation gates, and staged adoption. |
 | [Review bundle schema](REVIEW_BUNDLE_SCHEMA.md) | Artifact schema | Typed `sourcebrief.review-bundle.v1` fields, examples, redaction/completeness contract, and validation path. |
 | [Reviewer finding taxonomy](REVIEW_FINDING_TAXONOMY.md) | Reviewer contract | Severity policy, finding types, report schema, aggregation, and proposal eligibility. |
+| [Citation-support check](CITATION_SUPPORT_CHECK.md) | Deterministic reviewer lens | MVP unsupported-claim and citation-mismatch check over review bundles and golden fixtures. |
 | [Self-improvement golden fixtures](SELF_IMPROVEMENT_GOLDEN_FIXTURES.md) | Regression baseline | Minimum reviewer/gate fixtures for unsupported claims, citation mismatch, safe passing answers, and rejected proposals. |
 | [Self-improvement artifact security](SELF_IMPROVEMENT_SECURITY.md) | Security baseline | Sensitivity classes, redaction, reviewer egress, scope preservation, retention, and purge contract. |
 

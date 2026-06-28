@@ -299,7 +299,7 @@ Revisit this design if:
 - [#164](https://github.com/pingchesu/sourcebrief/issues/164) validation gate
 - [#165](https://github.com/pingchesu/sourcebrief/issues/165) staged adoption
 - [#166](https://github.com/pingchesu/sourcebrief/issues/166) GitHub PR integration
-- [#167](https://github.com/pingchesu/sourcebrief/issues/167) citation support checks
+- [#167](https://github.com/pingchesu/sourcebrief/issues/167) citation support checks; MVP deterministic check: [Citation-support check](CITATION_SUPPORT_CHECK.md)
 - [#168](https://github.com/pingchesu/sourcebrief/issues/168) history and observability
 - [#169](https://github.com/pingchesu/sourcebrief/issues/169) security, privacy, retention; implementation baseline: [Self-improvement artifact security](SELF_IMPROVEMENT_SECURITY.md)
 - [#170](https://github.com/pingchesu/sourcebrief/issues/170) nightly sleep/replay
