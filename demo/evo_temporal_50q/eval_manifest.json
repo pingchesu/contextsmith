@@ -1,0 +1,1992 @@
+{
+  "schema_version": "sourcebrief.eval-manifest.v1",
+  "name": "SourceBrief EvoEmbedding temporal-memory 50Q eval",
+  "description": "Structured temporal/memory eval for deciding whether EvoEmbedding-style retrieval is worth adopting in SourceBrief Retrieval V2. Placeholder IDs must be replaced with real imported resources before execution.",
+  "thresholds": {
+    "pass_min_rate": 0.8,
+    "partial_min_rate": 0.6,
+    "block_below_rate": 0.6,
+    "max_wrong_repo": 0,
+    "max_unsupported_claims": 0
+  },
+  "run": {
+    "sourcebrief_commit": "NORMALIZED_SOURCEBRIEF_COMMIT",
+    "api_url": "http://localhost:18000",
+    "web_url": "http://localhost:3105",
+    "workspace_id": "NORMALIZED_WORKSPACE_ID",
+    "project_id": "NORMALIZED_PROJECT_ID",
+    "resources": [
+      {
+        "key": "sourcebrief_docs",
+        "target_repo": "SourceBrief docs",
+        "resource_ids": [
+          "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+        ],
+        "snapshot_ids": [
+          "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+        ],
+        "upstream_commit": "NORMALIZED_UPSTREAM_COMMIT",
+        "import_type": "full",
+        "corpus_caveats": []
+      },
+      {
+        "key": "sourcebrief_self_improvement",
+        "target_repo": "SourceBrief self-improvement docs",
+        "resource_ids": [
+          "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+        ],
+        "snapshot_ids": [
+          "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+        ],
+        "upstream_commit": "",
+        "import_type": "full",
+        "corpus_caveats": []
+      },
+      {
+        "key": "sourcebrief_eval_artifacts",
+        "target_repo": "SourceBrief eval artifacts",
+        "resource_ids": [
+          "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+        ],
+        "snapshot_ids": [
+          "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID"
+        ],
+        "upstream_commit": "",
+        "import_type": "full",
+        "corpus_caveats": []
+      },
+      {
+        "key": "sourcebrief_thread_notes",
+        "target_repo": "SourceBrief EvoEmbedding thread notes",
+        "resource_ids": [
+          "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+        ],
+        "snapshot_ids": [
+          "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID"
+        ],
+        "upstream_commit": "",
+        "import_type": "limited",
+        "corpus_caveats": [
+          "operator-curated notes from the EvoEmbedding adoption thread; replace with the real imported thread resource before running"
+        ]
+      },
+      {
+        "key": "evoembedding_repo",
+        "target_repo": "EvoEmbedding repository",
+        "resource_ids": [
+          "NORMALIZED_EVOEMBEDDING_REPO_RESOURCE_ID"
+        ],
+        "snapshot_ids": [
+          "NORMALIZED_EVOEMBEDDING_REPO_SNAPSHOT_ID"
+        ],
+        "upstream_commit": "NORMALIZED_UPSTREAM_COMMIT",
+        "import_type": "full",
+        "corpus_caveats": []
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "temporal-order-001",
+      "query": "What was the earliest SourceBrief retrieval baseline that the EvoEmbedding discussion corrected?",
+      "target_repo": "sourcebrief_thread_notes",
+      "resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "limited",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "thread://evoembedding-adoption"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "hashing",
+        "term-overlap",
+        "dev_quality"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-002",
+      "query": "What is the latest accepted decision about whether EvoEmbedding should become the default retrieval profile?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "experimental",
+        "default",
+        "evals pass"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-003",
+      "query": "Which EvoEmbedding model sizes should be evaluated first before treating 4B as necessary?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "0.8B",
+        "2B",
+        "4B"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-004",
+      "query": "What is the first gate before temporal-memory adoption is evaluated?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Awesome Agent Harness",
+        "50Q",
+        "general"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-005",
+      "query": "What is the latest evaluator choice after rejecting the 30B evaluator premise?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Hermes",
+        "evaluator",
+        "Qwen/30B"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-006",
+      "query": "What was the earliest reason to avoid treating current retrieval as production-grade?",
+      "target_repo": "sourcebrief_thread_notes",
+      "resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "limited",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "thread://evoembedding-adoption"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "provider-health",
+        "dev_quality",
+        "hashing"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-007",
+      "query": "Which plan step comes after temporal-memory 50Q authoring and before adoption decision?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "runner",
+        "profile",
+        "evidence"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-008",
+      "query": "What is the latest non-goal about reproducing EvoEmbedding paper benchmarks?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Do not reproduce",
+        "paper benchmark"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-009",
+      "query": "What is the first concrete SourceBrief artifact that makes the temporal-memory gate reproducible?",
+      "target_repo": "sourcebrief_eval_artifacts",
+      "resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "demo/evo_temporal_50q/eval_manifest.json"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "sourcebrief.eval-manifest.v1",
+        "50"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "temporal-order-010",
+      "query": "Which issue sequence should lead to the final adoption decision?",
+      "target_repo": "sourcebrief_thread_notes",
+      "resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "limited",
+      "category": "temporal-order",
+      "customer_job": "answer first/latest retrieval questions",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "thread://evoembedding-adoption"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "#195",
+        "#200",
+        "adoption decision"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-001",
+      "query": "Which earlier assumption about production embedding/rerank was corrected, and what is the corrected state?",
+      "target_repo": "sourcebrief_thread_notes",
+      "resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "limited",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "thread://evoembedding-adoption"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "hashing",
+        "term-overlap",
+        "dev_quality"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-002",
+      "query": "How did the evaluator plan change after the Qwen/30B discussion?",
+      "target_repo": "sourcebrief_thread_notes",
+      "resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "limited",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "thread://evoembedding-adoption"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Hermes",
+        "not",
+        "30B"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-003",
+      "query": "Which decision moved the work from model integration first to evaluation design first?",
+      "target_repo": "sourcebrief_thread_notes",
+      "resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "limited",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "thread://evoembedding-adoption"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "evaluation",
+        "50",
+        "question"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-004",
+      "query": "What changed from direct embedding replacement to first-stage rerank evaluation?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "batch rerank",
+        "sidecar",
+        "vector"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-005",
+      "query": "What changed from current-state baseline to static embedding baseline as a fair comparator?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "static embedding",
+        "baseline",
+        "hashing"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-006",
+      "query": "Which adoption condition prevents README claims from becoming SourceBrief evidence?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "SourceBrief-owned evals",
+        "project-page claims"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-007",
+      "query": "Which earlier adoption scope is rejected until rerank POC justifies vector/schema v2?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "vector/schema v2",
+        "rerank POC"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-008",
+      "query": "Which decision keeps Torch/Transformers out of SourceBrief core for the first experiment?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "sidecar",
+        "core",
+        "Torch"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-009",
+      "query": "What changed from single-candidate rerank scoring to the required provider protocol?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "batch",
+        "rerank",
+        "documents"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "changed-decision-010",
+      "query": "Which premise should the evaluator reject if a question claims Qwen 30B is required?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "changed-decision",
+      "customer_job": "detect corrected assumptions and decision drift",
+      "difficulty": "hard",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Qwen/30B",
+        "not",
+        "required evaluator"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-001",
+      "query": "What happened before the Awesome Agent Harness bounded retry made the eval usable?",
+      "target_repo": "sourcebrief_eval_artifacts",
+      "resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/evaluations/awesome-agent-harness-50q-20260626.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "wide",
+        "exceeded",
+        "bounded retry"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-002",
+      "query": "What was the timeline from limited imports to the RISK launch verdict in the 50Q run?",
+      "target_repo": "sourcebrief_eval_artifacts",
+      "resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/evaluations/awesome-agent-harness-50q-20260626.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "limited",
+        "RISK",
+        "50"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-003",
+      "query": "Which evidence artifact records provider health before evaluating retrieval quality?",
+      "target_repo": "sourcebrief_eval_artifacts",
+      "resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/evaluations/awesome-agent-harness-50q-20260626.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "provider-health",
+        "run-environment"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-004",
+      "query": "What failure mode did the bounded retry path expose as a product finding?",
+      "target_repo": "sourcebrief_eval_artifacts",
+      "resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/evaluations/awesome-agent-harness-50q-20260626.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "budget",
+        "no queryable partial snapshot"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-005",
+      "query": "After a profile produces context, what must happen before claiming answer quality?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Hermes",
+        "grade",
+        "citations"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-006",
+      "query": "What is the intended order from provider health capture to aggregate report in the Evo eval run?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "provider health",
+        "retrieval-evals",
+        "agent-context",
+        "Hermes"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-007",
+      "query": "What must be preserved when a general 50Q corpus is partial or limited?",
+      "target_repo": "sourcebrief_eval_artifacts",
+      "resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_SNAPSHOT_ID",
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVAL_MANIFESTS.md",
+        "docs/evaluations/awesome-agent-harness-50q-20260626.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "limited",
+        "partial",
+        "caveat"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_EVAL_ARTIFACTS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "timeline-008",
+      "query": "Which event should happen only after temporal gains and safety gates pass?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "incident-timeline",
+      "customer_job": "recover before-after rollout evidence",
+      "difficulty": "medium",
+      "demo_type": "temporal-retrieval",
+      "expected_paths": [
+        "docs/EVOEMBEDDING_EVALUATION_PLAN.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "Adopt experimental",
+        "evo_temporal_rerank"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-001",
+      "query": "What review/proposal/gate path prevents SourceBrief from silently mutating runtime behavior?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "review",
+        "proposal",
+        "gate",
+        "staged"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-002",
+      "query": "Which artifact sequence connects a reviewer finding to human-reviewable staged adoption?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "review bundle",
+        "report",
+        "regression proposal",
+        "validation gate",
+        "staged"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-003",
+      "query": "What must a PR review bundle capture before reviewer agents can grade a change?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "PR",
+        "review bundle",
+        "changed paths"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-004",
+      "query": "Which document explains that staged adoption writes receipts rather than mutating production behavior?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "receipt",
+        "without mutating",
+        "production"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-005",
+      "query": "How should unsupported-claim findings be connected back to citations?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "citation",
+        "unsupported",
+        "claim"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-006",
+      "query": "Which self-improvement gate rejects unsafe or unsupported proposal adoption?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "validation gate",
+        "reject",
+        "proposal"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-007",
+      "query": "What review history evidence should be inspected before trusting a recurring learning candidate?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "bundle",
+        "report",
+        "proposal",
+        "gate"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "review-provenance-008",
+      "query": "Which path keeps generated runtime packs aligned with review/proposal/gate boundaries?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "review-provenance",
+      "customer_job": "trace reviewer finding provenance",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/STAGED_ADOPTION.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "runtime pack",
+        "review",
+        "staged-adoption"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-001",
+      "query": "Which evidence path should turn recurring retrieval failures into eval fixtures instead of automatic runtime changes?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "sleep",
+        "replay",
+        "dry-run",
+        "proposal"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-002",
+      "query": "What does the recurrence mining loop do before any staged adoption decision?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "recurring",
+        "dry-run",
+        "gate"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-003",
+      "query": "Which self-improvement artifact proves a proposed regression was accepted or rejected?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "validation",
+        "gate",
+        "accepted",
+        "rejected"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-004",
+      "query": "How should reviewer findings become regression proposals without applying them immediately?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "regression proposal",
+        "without applying"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-005",
+      "query": "What minimum fixtures protect citation mismatch and unsupported-claim behavior?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "golden fixtures",
+        "unsupported",
+        "citation mismatch"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-006",
+      "query": "Which security baseline governs reviewer egress and redaction?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "sensitivity",
+        "redaction",
+        "egress"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-007",
+      "query": "How does review history expose provenance without opening raw JSON by hand?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "history",
+        "provenance",
+        "redacted"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "self-improvement-008",
+      "query": "What should SourceBrief do with a safe passing answer in self-improvement golden fixtures?",
+      "target_repo": "sourcebrief_self_improvement",
+      "resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "self-improvement-provenance",
+      "customer_job": "trace self-improvement memory evidence",
+      "difficulty": "hard",
+      "demo_type": "provenance-retrieval",
+      "expected_paths": [
+        "docs/SELF_IMPROVEMENT.md",
+        "docs/SLEEP_REPLAY_LOOP.md"
+      ],
+      "expected_symbols": [],
+      "required_texts": [
+        "safe passing",
+        "golden",
+        "fixture"
+      ],
+      "forbidden_resource_ids": [],
+      "min_citations": 1,
+      "top_k": 8,
+      "max_chars": 8000,
+      "include_code_symbols": false,
+      "expected_result": "pass",
+      "bad_answer_criteria": [
+        "answers without citing the required temporal evidence",
+        "collapses distinct earlier/later states"
+      ],
+      "expected_resource_ids": [
+        "NORMALIZED_SELF_IMPROVEMENT_RESOURCE_ID"
+      ]
+    },
+    {
+      "id": "negative-control-001",
+      "query": "Has SourceBrief proven EvoEmbedding should replace every retrieval profile by default?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID",
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID",
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "negative-control",
+      "customer_job": "avoid unsupported adoption claims",
+      "difficulty": "medium",
+      "demo_type": "abstention",
+      "expected_paths": [],
+      "expected_symbols": [],
+      "required_texts": [],
+      "forbidden_resource_ids": [],
+      "min_citations": 0,
+      "top_k": 5,
+      "max_chars": 5000,
+      "include_code_symbols": false,
+      "expected_result": "expected_unanswerable",
+      "bad_answer_criteria": [
+        "claims EvoEmbedding is already proven as the default",
+        "ignores the adoption gates"
+      ],
+      "expected_resource_ids": []
+    },
+    {
+      "id": "negative-control-002",
+      "query": "Did the SourceBrief EvoEmbedding eval require Qwen 30B as the evaluator?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID",
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID",
+        "NORMALIZED_EVOEMBEDDING_REPO_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID",
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID",
+        "NORMALIZED_EVOEMBEDDING_REPO_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "negative-control",
+      "customer_job": "avoid unsupported adoption claims",
+      "difficulty": "medium",
+      "demo_type": "abstention",
+      "expected_paths": [],
+      "expected_symbols": [],
+      "required_texts": [],
+      "forbidden_resource_ids": [],
+      "min_citations": 0,
+      "top_k": 5,
+      "max_chars": 5000,
+      "include_code_symbols": false,
+      "expected_result": "expected_unanswerable",
+      "bad_answer_criteria": [
+        "says Qwen/30B is required",
+        "confuses EvoEmbedding model sizes with evaluator setup"
+      ],
+      "expected_resource_ids": []
+    },
+    {
+      "id": "negative-control-003",
+      "query": "Does EvoEmbedding 4B passing a paper benchmark prove SourceBrief citation support is correct?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID",
+        "NORMALIZED_EVOEMBEDDING_REPO_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID",
+        "NORMALIZED_EVOEMBEDDING_REPO_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "negative-control",
+      "customer_job": "avoid unsupported adoption claims",
+      "difficulty": "medium",
+      "demo_type": "abstention",
+      "expected_paths": [],
+      "expected_symbols": [],
+      "required_texts": [],
+      "forbidden_resource_ids": [],
+      "min_citations": 0,
+      "top_k": 5,
+      "max_chars": 5000,
+      "include_code_symbols": false,
+      "expected_result": "expected_unanswerable",
+      "bad_answer_criteria": [
+        "uses paper claims as SourceBrief evidence",
+        "omits SourceBrief citation grading"
+      ],
+      "expected_resource_ids": []
+    },
+    {
+      "id": "negative-control-004",
+      "query": "Is the current hashing provider a production-grade embedding baseline?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID",
+        "NORMALIZED_THREAD_NOTES_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID",
+        "NORMALIZED_THREAD_NOTES_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "negative-control",
+      "customer_job": "avoid unsupported adoption claims",
+      "difficulty": "medium",
+      "demo_type": "abstention",
+      "expected_paths": [],
+      "expected_symbols": [],
+      "required_texts": [],
+      "forbidden_resource_ids": [],
+      "min_citations": 0,
+      "top_k": 5,
+      "max_chars": 5000,
+      "include_code_symbols": false,
+      "expected_result": "expected_unanswerable",
+      "bad_answer_criteria": [
+        "claims hashing is production-grade",
+        "omits dev_quality"
+      ],
+      "expected_resource_ids": []
+    },
+    {
+      "id": "negative-control-005",
+      "query": "Can SourceBrief send private corpora to any external Evo endpoint without approval?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "negative-control",
+      "customer_job": "avoid unsupported adoption claims",
+      "difficulty": "medium",
+      "demo_type": "abstention",
+      "expected_paths": [],
+      "expected_symbols": [],
+      "required_texts": [],
+      "forbidden_resource_ids": [],
+      "min_citations": 0,
+      "top_k": 5,
+      "max_chars": 5000,
+      "include_code_symbols": false,
+      "expected_result": "expected_unanswerable",
+      "bad_answer_criteria": [
+        "allows unapproved external egress",
+        "ignores privacy non-goal"
+      ],
+      "expected_resource_ids": []
+    },
+    {
+      "id": "negative-control-006",
+      "query": "Should SourceBrief skip static embedding baselines and compare Evo only against hashing?",
+      "target_repo": "sourcebrief_docs",
+      "resource_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_RESOURCE_ID"
+      ],
+      "snapshot_ids": [
+        "NORMALIZED_SOURCEBRIEF_DOCS_SNAPSHOT_ID"
+      ],
+      "import_type": "full",
+      "category": "negative-control",
+      "customer_job": "avoid unsupported adoption claims",
+      "difficulty": "medium",
+      "demo_type": "abstention",
+      "expected_paths": [],
+      "expected_symbols": [],
+      "required_texts": [],
+      "forbidden_resource_ids": [],
+      "min_citations": 0,
+      "top_k": 5,
+      "max_chars": 5000,
+      "include_code_symbols": false,
+      "expected_result": "expected_unanswerable",
+      "bad_answer_criteria": [
+        "compares only against hashing",
+        "over-credits Evo for replacing a stub"
+      ],
+      "expected_resource_ids": []
+    }
+  ]
+}

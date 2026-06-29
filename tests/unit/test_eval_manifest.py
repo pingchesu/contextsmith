@@ -19,6 +19,7 @@ from sourcebrief_shared.eval_manifest import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_MANIFEST = ROOT / "demo" / "alpha" / "eval_manifest.json"
+EVO_TEMPORAL_MANIFEST = ROOT / "demo" / "evo_temporal_50q" / "eval_manifest.json"
 SAMPLE_REPORT = ROOT / "demo" / "alpha" / "eval_report_template.json"
 SCRIPT = ROOT / "scripts" / "eval_manifest.py"
 
@@ -50,6 +51,30 @@ def test_sample_eval_manifest_is_valid_and_hashable() -> None:
     assert summary["batch_count"] == 2
     assert summary["manifest_sha256"].startswith("sha256:")
     assert summary["manifest_sha256"] == sha256_digest(manifest)
+
+
+def test_evo_temporal_eval_manifest_is_valid_and_covers_expected_categories() -> None:
+    manifest = load_json_file(EVO_TEMPORAL_MANIFEST)
+
+    summary = validate_manifest(manifest)
+    categories = {question["category"] for question in manifest["questions"]}
+    negative_controls = [
+        question for question in manifest["questions"] if question["expected_result"] == "expected_unanswerable"
+    ]
+
+    assert summary["schema_version"] == "sourcebrief.eval-manifest.v1"
+    assert summary["question_count"] == 50
+    assert summary["batch_count"] == 5
+    assert len(negative_controls) == 6
+    assert categories == {
+        "changed-decision",
+        "incident-timeline",
+        "negative-control",
+        "review-provenance",
+        "self-improvement-provenance",
+        "temporal-order",
+    }
+    assert all(question["expected_resource_ids"] == [] for question in negative_controls)
 
 
 def test_eval_manifest_splits_to_api_max_ten_question_batches() -> None:
