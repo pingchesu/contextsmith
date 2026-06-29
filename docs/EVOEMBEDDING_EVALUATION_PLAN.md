@@ -32,7 +32,7 @@ This gate is necessary but not sufficient. It is not designed around EvoEmbeddin
 
 ### B. Temporal-memory gate: Evo temporal 50Q
 
-Add [`../demo/evo_temporal_50q/eval_manifest.json`](../demo/evo_temporal_50q/eval_manifest.json) as the second gate.
+Add [`../demo/evo_temporal_50q/eval_manifest.json`](../demo/evo_temporal_50q/eval_manifest.json) and its ordered fixture [`../demo/evo_temporal_50q/temporal_fixture.md`](../demo/evo_temporal_50q/temporal_fixture.md) as the second gate.
 
 Purpose:
 
@@ -41,11 +41,13 @@ Purpose:
 - incident/rollout timeline retrieval;
 - PR review provenance;
 - self-improvement review-bundle provenance;
-- negative controls that reject unsupported adoption claims.
+- false-premise controls that require cited “No” answers, plus true unanswerable controls for absent evidence.
 
 This is the adoption gate for EvoEmbedding-style retrieval.
 
 ## Profile matrix
+
+The exact profile config files are owned by the runner/sidecar follow-up issues. This plan records the comparison matrix and decision gates; #198/#199 must pin model endpoints, batch scoring behavior, latency budgets, and provider namespaces before running adoption evidence.
 
 Minimum profiles:
 
@@ -156,5 +158,6 @@ Passing this gate means a candidate is safe to continue evaluating. It does not 
 - Do not reproduce the EvoEmbedding paper benchmark.
 - Do not use Qwen/30B as required evaluator.
 - Do not make EvoEmbedding default before SourceBrief-owned evals pass.
+- Do not model answerable false-premise questions as unanswerable; answer them with cited negative evidence.
 - Do not treat current hashing/term-overlap as a production baseline.
 - Do not send private source/query data to unapproved external endpoints.
