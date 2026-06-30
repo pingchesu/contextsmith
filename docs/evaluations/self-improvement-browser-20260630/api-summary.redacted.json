@@ -1,0 +1,46 @@
+{
+  "auth_user_display": "Launch 50Q Admin",
+  "issue": 213,
+  "kind_counts": {
+    "bundle": 1,
+    "gate_result": 2,
+    "proposal": 2,
+    "report": 1,
+    "staged_adoption": 1
+  },
+  "metrics": {
+    "blocker_major_count": 1,
+    "bundle_count": 1,
+    "gate_accept_count": 2,
+    "gate_reject_count": 0,
+    "gate_result_count": 2,
+    "proposal_count": 2,
+    "proposal_rejected_count": 0,
+    "record_count": 7,
+    "report_count": 1,
+    "staged_adoption_count": 1
+  },
+  "next_safe_actions_count": 3,
+  "no_silent_mutation": true,
+  "notes": [
+    "absolute artifact root, workspace/project IDs, and session token intentionally omitted"
+  ],
+  "record_count": 7,
+  "sample_relative_paths": [
+    "runs/mvp-smoke-20260630T171334264285Z/regression-proposal.json",
+    "runs/mvp-smoke-20260630T171334264285Z/review-bundle.json",
+    "runs/mvp-smoke-20260630T171334264285Z/review-report.json",
+    "runs/mvp-smoke-20260630T171334264285Z/staged/proposal-finding-unsupported-nightly-optimizer/gate-result.json",
+    "runs/mvp-smoke-20260630T171334264285Z/staged/proposal-finding-unsupported-nightly-optimizer/receipt.json",
+    "runs/sleep-20260630T171611167485Z/sleep-test-unsupported-claim-claim-claim-nightly-optimizer-shipped-has-no-citation-dec.gate.json",
+    "runs/sleep-20260630T171611167485Z/sleep-test-unsupported-claim-claim-claim-nightly-optimizer-shipped-has-no-citation-dec.proposal.json"
+  ],
+  "shipped_surfaces_count": 8,
+  "source": "live local API after browser proof flow",
+  "status_counts": {
+    "None": 4,
+    "proposed": 2,
+    "staged": 1
+  },
+  "workspace_project_redacted": true
+}
