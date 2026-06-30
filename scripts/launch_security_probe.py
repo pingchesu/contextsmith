@@ -39,7 +39,8 @@ SENSITIVE_KEYS = {
     "authorization",
 }
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?P<prefix>(?P<key_quote>[\"']?)(?:token|api[_-]?key|secret|password|session[_-]?token|client[_-]?secret|access[_-]?token|refresh[_-]?token|authorization)(?P=key_quote)\s*[:=]\s*)(?P<quote>[\"']?)(?P<value>[^\s,;\"'}]+)(?P=quote)",
+    r"(?P<prefix>(?P<key_quote>[\"']?)(?:token|api[_-]?key|secret|password|session[_-]?token|client[_-]?secret|access[_-]?token|refresh[_-]?token|authorization)(?P=key_quote)\s*[:=]\s*)"
+    r"(?:(?P<quote>[\"'])(?P<quoted_value>[^\"']*)(?P=quote)|(?P<value>[^\s,;\"'}]+))",
     re.IGNORECASE,
 )
 LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])(?:/home/[^\s\"']+|/tmp/[^\s\"']+|file://[^\s\"']+)")
@@ -54,7 +55,8 @@ def utc_now() -> str:
 
 def redact_text(text: str) -> str:
     def replace_assignment(match: re.Match[str]) -> str:
-        return f"{match.group('prefix')}{match.group('quote')}{REDACTED}{match.group('quote')}"
+        quote = match.group("quote") or ""
+        return f"{match.group('prefix')}{quote}{REDACTED}{quote}"
 
     text = SECRET_ASSIGNMENT_RE.sub(replace_assignment, text)
     text = TOKEN_RE.sub(REDACTED, text)
@@ -98,7 +100,11 @@ def _count_unredacted_sensitive_key_values(value: Any) -> int:
 def scan_public_artifact(value: Any) -> dict[str, Any]:
     """Return counts for patterns that should not appear in public artifacts."""
     text = json.dumps(value, sort_keys=True, default=str) if not isinstance(value, str) else value
-    secret_assignments = sum(1 for match in SECRET_ASSIGNMENT_RE.finditer(text) if match.group("value") != REDACTED)
+    secret_assignments = sum(
+        1
+        for match in SECRET_ASSIGNMENT_RE.finditer(text)
+        if (match.group("quoted_value") if match.group("quote") else match.group("value")) != REDACTED
+    )
     return {
         "token_like": len(TOKEN_RE.findall(text)),
         "secret_assignment": secret_assignments + _count_unredacted_sensitive_key_values(value),
@@ -127,7 +133,6 @@ def _without_echoed_query(value: Any) -> Any:
 def response_contains_marker_evidence(response: dict[str, Any], marker: str) -> bool:
     """Check retrieved evidence fields, not echoed request/query fields, for a marker."""
     evidence = {
-        "answer": response.get("answer"),
         "context": response.get("context"),
         "contexts": response.get("contexts"),
         "citations": response.get("citations"),
@@ -154,6 +159,46 @@ def false_premise_is_handled(response: dict[str, Any]) -> bool:
     return any(term in answer for term in caveat_terms) or (not answer and len(citations) == 0)
 
 
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _int_count(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _console_entry_is_failure(entry: Any) -> bool:
+    if isinstance(entry, str):
+        return bool(re.search(r"\b(?:error|warning|warn)\b", entry, re.IGNORECASE))
+    if not isinstance(entry, dict):
+        return False
+    level = str(entry.get("type") or entry.get("level") or entry.get("severity") or "").lower()
+    return level in {"error", "warning", "warn"}
+
+
+def _network_entry_failed(entry: Any) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("failed") is True or entry.get("failure") or entry.get("error"):
+        return True
+    return bool(str(entry.get("errorText") or entry.get("error_text") or "").strip())
+
+
+def _network_entry_bad_response(entry: Any) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    status = entry.get("status") or entry.get("statusCode") or entry.get("status_code")
+    try:
+        return status is not None and int(str(status)) >= 400
+    except (TypeError, ValueError):
+        return False
+
+
 def analyze_browser_transcript(transcript_text: str) -> dict[str, Any]:
     """Fail closed on browser console/network failures, not only secret/path leaks."""
     try:
@@ -163,17 +208,35 @@ def analyze_browser_transcript(transcript_text: str) -> dict[str, Any]:
     lower_text = transcript_text.lower()
 
     if isinstance(parsed, dict):
-        console_entries = parsed.get("console") or parsed.get("consoleEntries") or parsed.get("console_entries") or []
-        console_error_count = int(parsed.get("console_error_count") or 0)
-        if isinstance(console_entries, list):
-            console_error_count += sum(
-                1
-                for item in console_entries
-                if isinstance(item, dict) and str(item.get("type", "")).lower() in {"error", "warning"}
-            )
-        page_error_count = int(parsed.get("page_error_count") or 0) + len(parsed.get("pageErrors") or parsed.get("page_errors") or [])
-        failed_request_count = int(parsed.get("failed_request_count") or 0) + len(parsed.get("failedRequests") or parsed.get("failed_requests") or [])
-        bad_response_count = int(parsed.get("bad_response_count") or 0) + len(parsed.get("badResponses") or parsed.get("bad_responses") or [])
+        console_entries = []
+        for key in ("console", "consoleEntries", "console_entries", "logs"):
+            console_entries.extend(_as_list(parsed.get(key)))
+        network_entries = []
+        for key in ("network", "networkEntries", "network_entries", "requests", "responses"):
+            network_entries.extend(_as_list(parsed.get(key)))
+        page_errors = _as_list(parsed.get("pageErrors") or parsed.get("page_errors"))
+        failed_requests = _as_list(parsed.get("failedRequests") or parsed.get("failed_requests"))
+        bad_responses = _as_list(parsed.get("badResponses") or parsed.get("bad_responses"))
+
+        console_error_count = _int_count(parsed.get("console_error_count")) + sum(
+            1 for item in console_entries if _console_entry_is_failure(item)
+        )
+        page_error_count = _int_count(parsed.get("page_error_count")) + len(page_errors)
+        failed_request_count = (
+            _int_count(parsed.get("failed_request_count"))
+            + len(failed_requests)
+            + sum(1 for item in network_entries if _network_entry_failed(item))
+        )
+        bad_response_count = (
+            _int_count(parsed.get("bad_response_count"))
+            + len(bad_responses)
+            + sum(1 for item in network_entries if _network_entry_bad_response(item))
+        )
+    elif isinstance(parsed, list):
+        console_error_count = sum(1 for item in parsed if _console_entry_is_failure(item))
+        page_error_count = 0
+        failed_request_count = sum(1 for item in parsed if _network_entry_failed(item))
+        bad_response_count = sum(1 for item in parsed if _network_entry_bad_response(item))
     else:
         console_error_count = len(re.findall(r"console\.(?:error|warn)|\b(?:error|warning):", lower_text))
         page_error_count = len(re.findall(r"page\s*error|pageerror", lower_text))

@@ -111,8 +111,22 @@ def browser_origin(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
 
 
+DEFAULT_CORS_ORIGINS = {
+    "http://localhost:13000",
+    "http://127.0.0.1:13000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3105",
+    "http://127.0.0.1:3105",
+    "http://localhost:3205",
+    "http://127.0.0.1:3205",
+}
+
+
 def configured_cors_origins(env_file: dict[str, str]) -> set[str]:
     raw = env_value("SOURCEBRIEF_CORS_ORIGINS", env_file) or env_value("CONTEXTSMITH_CORS_ORIGINS", env_file) or ""
+    if not raw:
+        return set(DEFAULT_CORS_ORIGINS)
     return {item.strip().rstrip("/") for item in raw.split(",") if item.strip()}
 
 

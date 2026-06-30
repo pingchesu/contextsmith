@@ -390,3 +390,13 @@ def test_launch_50q_cors_preflight_runs_before_compose(monkeypatch, tmp_path: Pa
         module.main()
 
     assert calls == []
+
+
+def test_launch_50q_cors_preflight_allows_api_default_origin_without_env() -> None:
+    module = load_module()
+
+    module.validate_browser_cors_origin("http://localhost:13000", {})
+    module.validate_browser_cors_origin("http://127.0.0.1:3105", {})
+
+    with pytest.raises(RuntimeError, match="SOURCEBRIEF_CORS_ORIGINS"):
+        module.validate_browser_cors_origin("http://localhost:49124", {})
