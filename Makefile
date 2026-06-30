@@ -104,9 +104,9 @@ alpha-eval: venv compose-up
 	API_URL=$(API_URL) SOURCEBRIEF_API_URL=$(API_URL) $(BIN)/python scripts/alpha_eval.py
 
 launch-security-probe: venv prepare-qa-fixtures
-	SOURCEBRIEF_DEV_AUTH=true $(COMPOSE) up -d --build
+	$(COMPOSE) up -d --build
 	$(BIN)/python scripts/wait_for_http.py $(API_URL)/readyz 120
-	API_URL=$(API_URL) WEB_URL=$(WEB_URL) SOURCEBRIEF_API_URL=$(API_URL) SOURCEBRIEF_WEB_URL=$(WEB_URL) COMPOSE_PROJECT_NAME=$(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(BIN)/python scripts/launch_security_probe.py --dev-auth-email launch-security-probe@example.com --compose-project-name $(or $(COMPOSE_PROJECT_NAME),sourcebrief)
+	API_URL=$(API_URL) WEB_URL=$(WEB_URL) SOURCEBRIEF_API_URL=$(API_URL) SOURCEBRIEF_WEB_URL=$(WEB_URL) COMPOSE_PROJECT_NAME=$(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(BIN)/python scripts/launch_security_probe.py --email '$(SOURCEBRIEF_ADMIN_EMAIL)' --compose-project-name $(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(if $(LAUNCH_SECURITY_BROWSER_TRANSCRIPT),--browser-transcript $(LAUNCH_SECURITY_BROWSER_TRANSCRIPT),)
 
 collect-e2e-evidence: venv
 	$(BIN)/python scripts/collect_e2e_evidence.py
