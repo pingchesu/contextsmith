@@ -22,9 +22,11 @@ import requests
 
 BASE = os.getenv("SOURCEBRIEF_API_URL") or os.getenv("CONTEXTSMITH_API_URL") or os.getenv("API_URL") or "http://localhost:18000"
 EMAIL = os.getenv("SOURCEBRIEF_EVAL_EMAIL", os.getenv("CONTEXTSMITH_EVAL_EMAIL", f"alpha-eval-{int(time.time())}@example.com"))
-HEADERS = {"X-User-Email": EMAIL}
+HEADERS: dict[str, str] = {}
+AUTH_MODE = ""
 DATASET = Path("demo/alpha/golden_questions.json")
 DEFAULT_REPORT = Path("artifacts/alpha-eval-report.json")
+TRUTHY = {"1", "true", "yes", "on"}
 
 
 def fail(message: str) -> None:
@@ -37,6 +39,50 @@ def request(method: str, path: str, expected: int, **kwargs: Any) -> Any:
     if response.status_code != expected:
         fail(f"{method} {path} expected {expected}, got {response.status_code}: {response.text}")
     return response.json() if response.content else None
+
+
+def authenticate() -> None:
+    """Populate HEADERS for the public API alpha eval.
+
+    The release gate should work against the normal local Compose stack, where
+    dev header auth is disabled and `.env` provides admin credentials. Keep the
+    explicit dev-auth path for disposable local testing, but do not make it the
+    implicit default.
+    """
+
+    global AUTH_MODE
+    email = os.getenv("SOURCEBRIEF_ADMIN_EMAIL") or os.getenv("CONTEXTSMITH_ADMIN_EMAIL")
+    password = os.getenv("SOURCEBRIEF_ADMIN_PASSWORD") or os.getenv("CONTEXTSMITH_ADMIN_PASSWORD")
+    if email and password:
+        response = requests.post(
+            f"{BASE}/auth/login",
+            json={"email": email, "password": password},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            fail(f"admin login failed with HTTP {response.status_code}: {response.text[:300]}")
+        body = response.json()
+        session_token = body.get("session_token")
+        if not session_token:
+            fail("admin login response did not include a session token")
+        HEADERS.clear()
+        HEADERS["Authorization"] = f"Bearer {session_token}"
+        AUTH_MODE = "session"
+        return
+
+    if (os.getenv("SOURCEBRIEF_DEV_AUTH") or os.getenv("CONTEXTSMITH_DEV_AUTH") or "").lower() in TRUTHY:
+        HEADERS.clear()
+        HEADERS["X-User-Email"] = EMAIL
+        AUTH_MODE = "dev"
+        return
+
+    fail("alpha eval requires SOURCEBRIEF_ADMIN_EMAIL/PASSWORD or SOURCEBRIEF_DEV_AUTH=true; API tokens cannot create the disposable workspaces/projects used by this release gate")
+
+
+def foreign_headers(ts: int) -> dict[str, str]:
+    if AUTH_MODE == "dev":
+        return {"X-User-Email": f"foreign-alpha-eval-{ts}@example.com"}
+    return dict(HEADERS)
 
 
 def build_repo_fixture(ts: int) -> tuple[str, str]:
@@ -307,6 +353,7 @@ def assert_no_cross_tenant_leak(workspace_id: str, project_id: str, foreign_mark
 
 
 def main() -> None:
+    authenticate()
     report_path = Path(os.getenv("SOURCEBRIEF_ALPHA_EVAL_REPORT", str(DEFAULT_REPORT)))
     ts = int(time.time() * 1000)
     golden_questions = json.loads(DATASET.read_text())
@@ -322,15 +369,15 @@ def main() -> None:
         "alpha_runbook_escalation says: if agent context lacks citations, check /provider-health, inspect index runs, and reindex the resource. "
         "The alpharunbook42 marker anchors the runbook golden question.\n",
     )
-    foreign_headers = {"X-User-Email": f"foreign-alpha-eval-{ts}@example.com"}
-    foreign_ws, foreign_project = create_workspace_project("Foreign Alpha Eval", ts, headers=foreign_headers)
+    foreign_resource_headers = foreign_headers(ts)
+    foreign_ws, foreign_project = create_workspace_project("Foreign Alpha Eval", ts, headers=foreign_resource_headers)
     foreign_resource_id = create_markdown_resource(
         foreign_ws,
         foreign_project,
         "Foreign Tenant Secret",
         "doc://foreign-tenant-secret",
         "# Foreign Tenant\n\nforbiddenleak42 must never appear in the primary project context.\n",
-        headers=foreign_headers,
+        headers=foreign_resource_headers,
     )
 
     resources = {"repo": repo_resource_id, "runbook": runbook_resource_id}
