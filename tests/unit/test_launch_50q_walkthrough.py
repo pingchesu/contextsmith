@@ -66,6 +66,43 @@ def test_launch_50q_defaults_follow_makefile_ports(tmp_path: Path, monkeypatch) 
     assert module.default_artifact_dir(123).name == "sourcebrief-launch-50q-123"
 
 
+def test_launch_50q_auth_falls_back_to_dev_auth_when_local_password_is_stale(monkeypatch) -> None:
+    module = load_module()
+
+    def fake_request(*args, **kwargs):
+        raise RuntimeError("POST /auth/login expected 200, got 401")
+
+    monkeypatch.setattr(module, "request", fake_request)
+    monkeypatch.setattr(module.time, "time", lambda: 123)
+    monkeypatch.delenv("SOURCEBRIEF_ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("SOURCEBRIEF_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("SOURCEBRIEF_DEV_AUTH", raising=False)
+    headers, session, mode = module.authenticate(
+        "http://api",
+        {"SOURCEBRIEF_ADMIN_EMAIL": "admin@example.com", "SOURCEBRIEF_ADMIN_PASSWORD": "stale", "SOURCEBRIEF_DEV_AUTH": "true"},
+    )
+
+    assert headers == {"X-User-Email": "launch-50q-123@example.com"}
+    assert session is None
+    assert mode == "dev_header_local_fallback"
+
+
+def test_launch_50q_browser_proof_requires_session_token() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "browser screenshot proof requires a /auth/login session token" in source
+    assert "session_token is None and not args.skip_screenshots" in source
+    assert "create_walkthrough_runtime_token" not in source
+
+
+def test_launch_50q_bundles_current_head_not_branch_name() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '["git", "rev-parse", "HEAD"]' in source
+    assert '["git", "update-ref", ref, "HEAD"]' in source
+    assert '["git", "bundle", "create", str(bundle), ref]' in source
+    assert '"branch": repo_branch' in source
+    assert '["git", "bundle", "create", str(bundle), "main"]' not in source
+
+
 def test_launch_50q_expected_unanswerable_allows_unsupported_citations(monkeypatch) -> None:
     module = load_module()
     ctx = module.WalkthroughContext(
@@ -151,6 +188,7 @@ def test_launch_50q_verdict_blocks_failed_questions_and_missing_negative_control
         quality_warnings=[],
         scenario_results={"mcp_context_is_error": False, "grep_code_is_error": False, "cli_search_exit_code": 0},
         negative_control_count=0,
+        thresholds={"required_question_count": 0},
     )
 
     assert verdict == "BLOCK"
@@ -166,10 +204,54 @@ def test_launch_50q_verdict_risk_for_quality_warnings_only() -> None:
         quality_warnings=[{"id": "q1"}],
         scenario_results={"mcp_context_is_error": False, "grep_code_is_error": False, "cli_search_exit_code": 0},
         negative_control_count=1,
+        browser_capture={
+            "screenshots": [{"path": f"screenshots/{index}.png"} for index in range(7)],
+            "console_network": {"path": "browser/console-network.json", "page_error_count": 0, "failed_request_count": 0},
+        },
+        thresholds={"required_question_count": 0, "required_screenshot_count": 7, "require_browser_console_network_transcript": True},
     )
 
     assert verdict == "RISK"
     assert reasons == ["answer_quality_warnings_present"]
+
+
+def test_launch_50q_verdict_predeclares_full_coverage_and_browser_requirements() -> None:
+    module = load_module()
+    verdict, reasons = module.launch_verdict(
+        index_status="succeeded",
+        results=[{"id": "q1", "mechanical_status": "pass", "wrong_resource_citation_count": 1}],
+        quality_warnings=[],
+        scenario_results={"mcp_context_is_error": False, "grep_code_is_error": False, "cli_search_exit_code": 0},
+        negative_control_count=1,
+        browser_capture={"screenshots": [{"path": "screenshots/01-login.png"}], "console_network": {"bad_response_count": 2, "console_error_count": 1}},
+    )
+
+    assert verdict == "BLOCK"
+    assert "incomplete_question_coverage:1/50" in reasons
+    assert "wrong_resource_citations:1>0" in reasons
+    assert "missing_screenshots:1/7" in reasons
+    assert "missing_browser_console_network_transcript" in reasons
+    assert "browser_console_errors:1>0" in reasons
+    assert "browser_bad_responses:2>0" in reasons
+
+
+def test_launch_50q_screenshot_inventory_records_hashes(tmp_path: Path) -> None:
+    module = load_module()
+    screenshots = tmp_path / "screenshots"
+    screenshots.mkdir()
+    shot = screenshots / "01-login.png"
+    shot.write_bytes(b"fake-png")
+
+    inventory = module.screenshot_inventory(screenshots, tmp_path)
+
+    assert inventory == [
+        {
+            "label": "01-login",
+            "path": "screenshots/01-login.png",
+            "sha256": "sha256:f084b1351c41cf3c554d932a3a978992a39b902f289c6e213b6428c3b38541ed",
+            "bytes": 8,
+        }
+    ]
 
 
 def test_launch_50q_redaction_strips_tokens_passwords_and_ids() -> None:
@@ -228,4 +310,4 @@ def test_launch_50q_public_doc_links_operations_and_screenshots() -> None:
         assert (ROOT / "docs" / "assets" / "screenshots" / "launch-50q" / name).exists()
         assert name in doc
     assert "50Q launch proof with screenshots" in readme
-    assert "screenshot-by-screenshot proof table" in proof
+    assert "screenshot inventory hashes" in proof
