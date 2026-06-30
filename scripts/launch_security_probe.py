@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,8 +24,22 @@ from typing import Any
 import requests
 
 TOKEN_RE = re.compile(r"(cs_[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]+|gh[pousr]_[A-Za-z0-9_]+)")
+SENSITIVE_KEYS = {
+    "token",
+    "api_key",
+    "apikey",
+    "secret",
+    "password",
+    "session_token",
+    "sessiontoken",
+    "client_secret",
+    "clientsecret",
+    "access_token",
+    "refresh_token",
+    "authorization",
+}
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?P<prefix>\b(?:token|api[_-]?key|secret|password|session[_-]?token|client[_-]?secret)\b\s*[:=]\s*)(?P<quote>[\"']?)(?P<value>[^\s,;\"']+)(?P=quote)",
+    r"(?P<prefix>(?P<key_quote>[\"']?)(?:token|api[_-]?key|secret|password|session[_-]?token|client[_-]?secret|access[_-]?token|refresh[_-]?token|authorization)(?P=key_quote)\s*[:=]\s*)(?P<quote>[\"']?)(?P<value>[^\s,;\"'}]+)(?P=quote)",
     re.IGNORECASE,
 )
 LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])(?:/home/[^\s\"']+|/tmp/[^\s\"']+|file://[^\s\"']+)")
@@ -47,9 +62,18 @@ def redact_text(text: str) -> str:
     return text
 
 
+def is_sensitive_key(key: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+    return normalized in SENSITIVE_KEYS or any(part in normalized for part in ("password", "secret", "token", "apikey"))
+
+
 def redact_json(value: Any) -> Any:
     if isinstance(value, dict):
-        return {str(key): redact_json(item) for key, item in value.items()}
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            redacted[key_text] = REDACTED if is_sensitive_key(key_text) else redact_json(item)
+        return redacted
     if isinstance(value, list):
         return [redact_json(item) for item in value]
     if isinstance(value, str):
@@ -57,12 +81,27 @@ def redact_json(value: Any) -> Any:
     return value
 
 
+def _count_unredacted_sensitive_key_values(value: Any) -> int:
+    if isinstance(value, dict):
+        count = 0
+        for key, item in value.items():
+            if is_sensitive_key(key) and item not in {None, "", REDACTED}:
+                count += 1
+            else:
+                count += _count_unredacted_sensitive_key_values(item)
+        return count
+    if isinstance(value, list):
+        return sum(_count_unredacted_sensitive_key_values(item) for item in value)
+    return 0
+
+
 def scan_public_artifact(value: Any) -> dict[str, Any]:
     """Return counts for patterns that should not appear in public artifacts."""
     text = json.dumps(value, sort_keys=True, default=str) if not isinstance(value, str) else value
+    secret_assignments = sum(1 for match in SECRET_ASSIGNMENT_RE.finditer(text) if match.group("value") != REDACTED)
     return {
         "token_like": len(TOKEN_RE.findall(text)),
-        "secret_assignment": len(SECRET_ASSIGNMENT_RE.findall(text)),
+        "secret_assignment": secret_assignments + _count_unredacted_sensitive_key_values(value),
         "local_path": len(LOCAL_PATH_RE.findall(text)),
         "raw_uuid": len(UUID_RE.findall(text)),
     }
@@ -75,6 +114,80 @@ def status_from_counts(counts: dict[str, int], *, allow_raw_uuid: bool = False) 
         if count and not (allow_raw_uuid and key == "raw_uuid")
     }
     return "pass" if not failures else "block"
+
+
+def _without_echoed_query(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _without_echoed_query(item) for key, item in value.items() if str(key).lower() not in {"query", "request", "input"}}
+    if isinstance(value, list):
+        return [_without_echoed_query(item) for item in value]
+    return value
+
+
+def response_contains_marker_evidence(response: dict[str, Any], marker: str) -> bool:
+    """Check retrieved evidence fields, not echoed request/query fields, for a marker."""
+    evidence = {
+        "answer": response.get("answer"),
+        "context": response.get("context"),
+        "contexts": response.get("contexts"),
+        "citations": response.get("citations"),
+        "sources": response.get("sources"),
+    }
+    return marker.lower() in json.dumps(_without_echoed_query(evidence), sort_keys=True, default=str).lower()
+
+
+def false_premise_is_handled(response: dict[str, Any]) -> bool:
+    answer = str(response.get("answer") or "").strip().lower()
+    citations = response.get("citations") or []
+    caveat_terms = (
+        "insufficient",
+        "not enough",
+        "no evidence",
+        "no cited evidence",
+        "not found",
+        "unsupported",
+        "cannot determine",
+        "can't determine",
+        "do not have evidence",
+        "don't have evidence",
+    )
+    return any(term in answer for term in caveat_terms) or (not answer and len(citations) == 0)
+
+
+def analyze_browser_transcript(transcript_text: str) -> dict[str, Any]:
+    """Fail closed on browser console/network failures, not only secret/path leaks."""
+    try:
+        parsed = json.loads(transcript_text)
+    except json.JSONDecodeError:
+        parsed = None
+    lower_text = transcript_text.lower()
+
+    if isinstance(parsed, dict):
+        console_entries = parsed.get("console") or parsed.get("consoleEntries") or parsed.get("console_entries") or []
+        console_error_count = int(parsed.get("console_error_count") or 0)
+        if isinstance(console_entries, list):
+            console_error_count += sum(
+                1
+                for item in console_entries
+                if isinstance(item, dict) and str(item.get("type", "")).lower() in {"error", "warning"}
+            )
+        page_error_count = int(parsed.get("page_error_count") or 0) + len(parsed.get("pageErrors") or parsed.get("page_errors") or [])
+        failed_request_count = int(parsed.get("failed_request_count") or 0) + len(parsed.get("failedRequests") or parsed.get("failed_requests") or [])
+        bad_response_count = int(parsed.get("bad_response_count") or 0) + len(parsed.get("badResponses") or parsed.get("bad_responses") or [])
+    else:
+        console_error_count = len(re.findall(r"console\.(?:error|warn)|\b(?:error|warning):", lower_text))
+        page_error_count = len(re.findall(r"page\s*error|pageerror", lower_text))
+        failed_request_count = len(re.findall(r"failed\s+to\s+fetch|failed\s+request|net::err", lower_text))
+        bad_response_count = len(re.findall(r"\b(?:status|http)\s*[:=]?\s*5\d\d|\b(?:status|http)\s*[:=]?\s*4\d\d", lower_text))
+
+    failure_counts = {
+        "console_error_count": console_error_count,
+        "page_error_count": page_error_count,
+        "failed_request_count": failed_request_count,
+        "bad_response_count": bad_response_count,
+    }
+    status = "pass" if all(count == 0 for count in failure_counts.values()) else "block"
+    return {"status": status, **failure_counts}
 
 
 @dataclass
@@ -224,7 +337,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         "body": redact_json(provider_health.json() if provider_health.content else {}),
     }
 
-    workspace = admin_api.json("POST", "/workspaces", expected=201, json={"name": "Launch Security", "slug": f"launch-security-{int(time.time())}"})
+    workspace = admin_api.json("POST", "/workspaces", expected=201, json={"name": "Launch Security", "slug": f"launch-security-{int(time.time_ns())}-{uuid.uuid4().hex[:8]}"})
     ws = str(workspace["id"])
     project_a = admin_api.json("POST", f"/workspaces/{ws}/projects", expected=201, json={"name": "Allowed Project", "description": "launch security allowed"})
     project_b = admin_api.json("POST", f"/workspaces/{ws}/projects", expected=201, json={"name": "Denied Project", "description": "launch security denied"})
@@ -244,113 +357,128 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         "runs": redact_json(index_runs),
     }
 
-    restricted_token, restricted_token_id = create_runtime_token(admin_api, ws, proj_a, res_a)
-    restricted_api = Api(api_url, {"Authorization": f"Bearer {restricted_token}"})
+    restricted_token_id: str | None = None
+    missing_scope_token_id: str | None = None
+    try:
+        restricted_token, restricted_token_id = create_runtime_token(admin_api, ws, proj_a, res_a)
+        restricted_api = Api(api_url, {"Authorization": f"Bearer {restricted_token}"})
 
-    allowed_context = restricted_api.json(
-        "POST",
-        f"/workspaces/{ws}/projects/{proj_a}/agent-context",
-        expected=200,
-        json={"query": MARKER, "resource_ids": [res_a], "runtime": "hermes", "include_answer": True},
-    )
-    allowed_citations = allowed_context.get("citations") or []
-    allowed_ok = MARKER in json.dumps(allowed_context).lower() and allowed_citations and all(str(c.get("resource_id")) == res_a for c in allowed_citations)
-    checks["scoped_token_allowed_context"] = {
-        "status": "pass" if allowed_ok else "block",
-        "citation_count": len(allowed_citations),
-        "resource_ids": sorted({str(c.get("resource_id")) for c in allowed_citations}),
-    }
+        allowed_context = restricted_api.json(
+            "POST",
+            f"/workspaces/{ws}/projects/{proj_a}/agent-context",
+            expected=200,
+            json={"query": MARKER, "resource_ids": [res_a], "runtime": "hermes", "include_answer": True},
+        )
+        allowed_citations = allowed_context.get("citations") or []
+        marker_in_evidence = response_contains_marker_evidence(allowed_context, MARKER)
+        allowed_ok = marker_in_evidence and allowed_citations and all(str(c.get("resource_id")) == res_a for c in allowed_citations)
+        checks["scoped_token_allowed_context"] = {
+            "status": "pass" if allowed_ok else "block",
+            "marker_in_evidence": marker_in_evidence,
+            "citation_count": len(allowed_citations),
+            "resource_ids": sorted({str(c.get("resource_id")) for c in allowed_citations}),
+        }
 
-    denied_project = restricted_api.request(
-        "POST",
-        f"/workspaces/{ws}/projects/{proj_b}/agent-context",
-        expected={403, 404},
-        json={"query": "otherprojectmarker", "resource_ids": [res_other_project]},
-    )
-    checks["cross_project_denial"] = {"status": "pass", "http_status": denied_project.status_code}
+        denied_project = restricted_api.request(
+            "POST",
+            f"/workspaces/{ws}/projects/{proj_b}/agent-context",
+            expected={403, 404},
+            json={"query": "otherprojectmarker", "resource_ids": [res_other_project]},
+        )
+        checks["cross_project_denial"] = {"status": "pass", "http_status": denied_project.status_code}
 
-    denied_resource = restricted_api.request(
-        "POST",
-        f"/workspaces/{ws}/projects/{proj_a}/agent-context",
-        expected={403, 404},
-        json={"query": "deniedmarker", "resource_ids": [res_b]},
-    )
-    checks["cross_resource_denial"] = {"status": "pass", "http_status": denied_resource.status_code}
+        denied_resource = restricted_api.request(
+            "POST",
+            f"/workspaces/{ws}/projects/{proj_a}/agent-context",
+            expected={403, 404},
+            json={"query": "deniedmarker", "resource_ids": [res_b]},
+        )
+        checks["cross_resource_denial"] = {"status": "pass", "http_status": denied_resource.status_code}
 
-    missing_scope_created = admin_api.json(
-        "POST",
-        f"/workspaces/{ws}/api-tokens",
-        expected=201,
-        json={
-            "name": "launch-security-probe-readonly-token",
-            "scopes": ["project:read", "resource:read"],
-            "allowed_project_ids": [proj_a],
-            "allowed_resource_ids": [res_a],
-        },
-    )
-    missing_scope_token = str(missing_scope_created["token"])
-    missing_scope_token_id = str(missing_scope_created["api_token"]["id"])
-    missing_scope_response = Api(api_url, {"Authorization": f"Bearer {missing_scope_token}"}).request(
-        "POST",
-        f"/workspaces/{ws}/projects/{proj_a}/agent-context",
-        expected=403,
-        json={"query": MARKER, "resource_ids": [res_a]},
-    )
-    checks["scope_mismatch_denial"] = {"status": "pass", "http_status": missing_scope_response.status_code}
+        missing_scope_created = admin_api.json(
+            "POST",
+            f"/workspaces/{ws}/api-tokens",
+            expected=201,
+            json={
+                "name": "launch-security-probe-readonly-token",
+                "scopes": ["project:read", "resource:read"],
+                "allowed_project_ids": [proj_a],
+                "allowed_resource_ids": [res_a],
+            },
+        )
+        missing_scope_token = str(missing_scope_created["token"])
+        missing_scope_token_id = str(missing_scope_created["api_token"]["id"])
+        missing_scope_response = Api(api_url, {"Authorization": f"Bearer {missing_scope_token}"}).request(
+            "POST",
+            f"/workspaces/{ws}/projects/{proj_a}/agent-context",
+            expected=403,
+            json={"query": MARKER, "resource_ids": [res_a]},
+        )
+        checks["scope_mismatch_denial"] = {"status": "pass", "http_status": missing_scope_response.status_code}
 
-    mcp_denial = restricted_api.request(
-        "POST",
-        f"/mcp/{ws}/{proj_b}",
-        expected={403, 404},
-        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "launch-security-probe", "version": "1"}}},
-    )
-    checks["mcp_project_scope_denial"] = {"status": "pass", "http_status": mcp_denial.status_code}
+        mcp_denial = restricted_api.request(
+            "POST",
+            f"/mcp/{ws}/{proj_b}",
+            expected={403, 404},
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "launch-security-probe", "version": "1"}}},
+        )
+        checks["mcp_project_scope_denial"] = {"status": "pass", "http_status": mcp_denial.status_code}
 
-    false_premise = restricted_api.json(
-        "POST",
-        f"/workspaces/{ws}/projects/{proj_a}/agent-context",
-        expected=200,
-        json={"query": "Which deployment used the imaginary no-such-sourcebrief-launch-fact?", "resource_ids": [res_a], "runtime": "hermes", "include_answer": True},
-    )
-    false_context = json.dumps(false_premise).lower()
-    checks["false_premise_behavior"] = {
-        "status": "pass" if "insufficient" in false_context or "not enough" in false_context or len(false_premise.get("citations") or []) <= 1 else "risk",
-        "citation_count": len(false_premise.get("citations") or []),
-        "answer_excerpt": redact_text(str(false_premise.get("answer") or ""))[:600],
-    }
+        false_premise = restricted_api.json(
+            "POST",
+            f"/workspaces/{ws}/projects/{proj_a}/agent-context",
+            expected=200,
+            json={"query": "Which deployment used the imaginary no-such-sourcebrief-launch-fact?", "resource_ids": [res_a], "runtime": "hermes", "include_answer": True},
+        )
+        false_ok = false_premise_is_handled(false_premise)
+        checks["false_premise_behavior"] = {
+            "status": "pass" if false_ok else "block",
+            "explicit_unsupported_or_insufficient": false_ok,
+            "citation_count": len(false_premise.get("citations") or []),
+            "answer_excerpt": redact_text(str(false_premise.get("answer") or ""))[:600],
+        }
 
-    empty_project = admin_api.json("POST", f"/workspaces/{ws}/projects", expected=201, json={"name": "No Snapshot Project"})
-    empty_response = admin_api.json(
-        "POST",
-        f"/workspaces/{ws}/projects/{empty_project['id']}/agent-context",
-        expected=200,
-        json={"query": "anything", "runtime": "hermes", "include_answer": True},
-    )
-    checks["no_source_no_snapshot"] = {
-        "status": "pass" if len(empty_response.get("citations") or []) == 0 else "block",
-        "citation_count": len(empty_response.get("citations") or []),
-        "answer_excerpt": redact_text(str(empty_response.get("answer") or ""))[:600],
-    }
+        empty_project = admin_api.json("POST", f"/workspaces/{ws}/projects", expected=201, json={"name": "No Snapshot Project"})
+        empty_response = admin_api.json(
+            "POST",
+            f"/workspaces/{ws}/projects/{empty_project['id']}/agent-context",
+            expected=200,
+            json={"query": "anything", "runtime": "hermes", "include_answer": True},
+        )
+        checks["no_source_no_snapshot"] = {
+            "status": "pass" if len(empty_response.get("citations") or []) == 0 else "block",
+            "citation_count": len(empty_response.get("citations") or []),
+            "answer_excerpt": redact_text(str(empty_response.get("answer") or ""))[:600],
+        }
 
-    failed_import = admin_api.request(
-        "POST",
-        f"/workspaces/{ws}/projects/{proj_a}/resources",
-        expected=422,
-        json={"type": "upload", "name": "Bad Upload", "uri": "upload://bad", "source_config": {"path": "/home/user/secret.md"}},
-    )
-    checks["failed_or_partial_import"] = {"status": "pass", "http_status": failed_import.status_code}
-
-    revoked_tokens: dict[str, bool] = {}
-    for label, token_id in {
-        "runtime_context": restricted_token_id,
-        "missing_scope": missing_scope_token_id,
-    }.items():
-        revoked = admin_api.json("DELETE", f"/workspaces/{ws}/api-tokens/{token_id}", expected=200)
-        revoked_tokens[label] = bool(revoked.get("revoked_at"))
-    checks["token_revocation"] = {
-        "status": "pass" if all(revoked_tokens.values()) else "block",
-        "revoked": revoked_tokens,
-    }
+        failed_import = admin_api.request(
+            "POST",
+            f"/workspaces/{ws}/projects/{proj_a}/resources",
+            expected=422,
+            json={"type": "upload", "name": "Bad Upload", "uri": "upload://bad", "source_config": {"path": "/home/user/secret.md"}},
+        )
+        checks["failed_or_partial_import"] = {"status": "pass", "http_status": failed_import.status_code}
+    finally:
+        revoked_tokens: dict[str, bool] = {}
+        revoke_errors: dict[str, str] = {}
+        for label, token_id in {
+            "runtime_context": restricted_token_id,
+            "missing_scope": missing_scope_token_id,
+        }.items():
+            if not token_id:
+                continue
+            try:
+                revoked = admin_api.json("DELETE", f"/workspaces/{ws}/api-tokens/{token_id}", expected=200)
+                revoked_tokens[label] = bool(revoked.get("revoked_at"))
+            except Exception as exc:  # best-effort cleanup must not hide the original probe failure
+                revoked_tokens[label] = False
+                revoke_errors[label] = redact_text(str(exc))
+        if revoked_tokens or revoke_errors:
+            checks["token_revocation"] = {
+                "status": "pass" if revoked_tokens and all(revoked_tokens.values()) and not revoke_errors else "block",
+                "revoked": revoked_tokens,
+                "errors": revoke_errors,
+            }
 
     audits = admin_api.json("GET", f"/workspaces/{ws}/audit-events", expected=200)
     audit_actions = [event.get("action") for event in audits[:20]]
@@ -366,7 +494,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             "worker_default": run_command(["docker", "compose", "-p", args.compose_project_name, "logs", "--tail", "120", "worker-default"], cwd=root),
             "worker_maintenance": run_command(["docker", "compose", "-p", args.compose_project_name, "logs", "--tail", "120", "worker-maintenance"], cwd=root),
         }
-        log_status = "pass" if any(item.get("exit_code") == 0 for item in logs.values()) else "risk"
+        log_status = "pass" if logs and all(item.get("exit_code") == 0 for item in logs.values()) else "risk"
     else:
         logs = {"omitted_reason": "--compose-project-name not provided; server-side API/index/audit/provider evidence captured instead"}
         log_status = "risk"
@@ -376,10 +504,13 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         transcript_path = Path(args.browser_transcript)
         transcript_text = transcript_path.read_text(encoding="utf-8")
         transcript_scan = scan_public_artifact(transcript_text)
+        transcript_failures = analyze_browser_transcript(transcript_text)
+        redaction_status = status_from_counts(transcript_scan)
         checks["browser_console_network"] = {
-            "status": status_from_counts(transcript_scan),
+            "status": "block" if redaction_status == "block" or transcript_failures["status"] == "block" else "pass",
             "source": str(transcript_path),
             "redaction_scan": transcript_scan,
+            "failure_scan": transcript_failures,
         }
     else:
         checks["browser_console_network"] = {
@@ -425,6 +556,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dev-auth-email", help="use local dev-auth X-User-Email instead of token/session login")
     parser.add_argument("--compose-project-name", default=os.getenv("COMPOSE_PROJECT_NAME"), help="capture docker compose logs for this project")
     parser.add_argument("--browser-transcript", help="optional browser console/network transcript JSON/text captured by #210/#213")
+    parser.add_argument("--allow-risk-exit-zero", action="store_true", help="return 0 for RISK reports; default is fail-closed so launch collectors cannot mistake RISK for PASS")
     parser.add_argument("--run-id")
     parser.add_argument("--output", help="output JSON path; defaults to artifacts/e2e/<run-id>/launch-security-probe.json")
     return parser
@@ -441,7 +573,11 @@ def main(argv: list[str] | None = None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"status": report["status"], "output": str(output)}, sort_keys=True))
-    return 0 if report["status"] in {"pass", "risk"} else 1
+    if report["status"] == "pass":
+        return 0
+    if report["status"] == "risk" and args.allow_risk_exit_zero:
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

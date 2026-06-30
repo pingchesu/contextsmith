@@ -22,7 +22,7 @@ make migrate
 python scripts/collect_e2e_evidence.py \
   --command 'make qa-smoke' \
   --command 'make alpha-eval' \
-  --command 'make launch-security-probe' \
+  --command 'LAUNCH_SECURITY_BROWSER_TRANSCRIPT=<browser-console-network.json> make launch-security-probe' \
   --include-file alpha-eval=artifacts/alpha-eval-report.json
 ```
 
@@ -73,18 +73,20 @@ Issue #218 readiness uses `make launch-security-probe` as the live security/obse
 - audit-event visibility for admin users;
 - no-source/no-snapshot and false-premise behavior;
 - failed import validation;
-- optional Docker service logs when `COMPOSE_PROJECT_NAME` is provided;
-- optional browser console/network transcript scan when `--browser-transcript` is provided.
+- Docker service logs when `COMPOSE_PROJECT_NAME` is provided;
+- browser console/network transcript scan when `--browser-transcript` or `LAUNCH_SECURITY_BROWSER_TRANSCRIPT` is provided.
 
-The probe returns `PASS` only when all required checks pass. It returns `RISK` if a current run omits browser console/network proof or service-log capture; that is acceptable for preserving partial evidence, but launch readiness still needs the browser proof from #210/#213.
+The probe exits `0` only for `PASS` by default. `RISK` (for example missing browser console/network proof) is still written as partial evidence but exits nonzero so launch collectors cannot mistake it for PASS. Use `--allow-risk-exit-zero` only for exploratory/manual debugging runs where the caller explicitly preserves the `RISK` status.
 
 Run it directly when debugging the security gate:
 
 ```bash
-make launch-security-probe
+LAUNCH_SECURITY_BROWSER_TRANSCRIPT=<browser-console-network.json> make launch-security-probe
 ```
 
-For an externally authenticated stack, call the script directly with `--token-env` or `--email --password-env` instead of the dev-auth Make target.
+Without a browser transcript the probe records `RISK` and exits nonzero by default; for manual partial-evidence debugging, call `scripts/launch_security_probe.py --allow-risk-exit-zero` directly.
+
+For an externally authenticated stack, call the script directly with `--token-env` or `--email --password-env`. The Make target uses session/admin login and no longer starts the shared Compose stack in dev-header auth mode by default.
 
 ## Example with additional proof commands
 
@@ -92,7 +94,7 @@ For an externally authenticated stack, call the script directly with `--token-en
 python scripts/collect_e2e_evidence.py \
   --command 'make qa-smoke' \
   --command 'make alpha-eval' \
-  --command 'make launch-security-probe' \
+  --command 'LAUNCH_SECURITY_BROWSER_TRANSCRIPT=<browser-console-network.json> make launch-security-probe' \
   --include-file alpha-eval=artifacts/alpha-eval-report.json
 ```
 
