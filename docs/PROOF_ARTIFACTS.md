@@ -69,6 +69,7 @@ These are not screenshots, but they are stronger than prose because they run aga
 | --- | --- |
 | Expanded MCP tools, aliases, `resource_ref`, pinned `read_section`, Context Pack scoping, graph overview. | `tests/integration/test_manifest_diff_flow.py::test_expanded_mcp_runtime_tools_f` |
 | Self-improvement product surface: overview, no-silent-mutation boundary, MVP smoke, redacted review history/artifact detail, and sleep dry-run. | PR #206 / `6babf67`; `make qa-smoke`; `tests/unit/test_self_improvement_mvp_product.py`; visual/browser recapture remains a launch-signoff follow-up if this page becomes part of public screenshots. |
+| Launch security/failure-mode gate: scoped token allow/deny/revoke, provider health, queue/index-run observability, audit-event visibility, redacted artifact scan, and failure-mode probes. | Issue #218 / `make launch-security-probe`; `scripts/launch_security_probe.py`; `tests/unit/test_launch_security_probe.py`. Current readiness PASS still requires a run captured under ignored `artifacts/e2e/` for the declared candidate plus browser console/network proof from #210/#213. |
 | Agent-context API and MCP `tools/list` / `tools/call` contract. | `tests/integration/test_agent_integrations_flow.py::test_agent_context_api_and_mcp_tool_call` |
 | Remote code search/grep/read/symbol MCP flow. | `tests/integration/test_remote_code_tools_flow.py::test_remote_code_http_and_mcp_flow` |
 | Runtime setup/doctor/token preset behavior. | `tests/unit/test_cli.py` doctor/runtime/token tests plus real local smoke recorded in PR #68. |

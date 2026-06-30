@@ -17,7 +17,7 @@ WEB_URL ?= http://localhost:$(SOURCEBRIEF_WEB_PORT)
 DATABASE_URL ?= $(if $(SOURCEBRIEF_DATABASE_URL),$(SOURCEBRIEF_DATABASE_URL),$(if $(CONTEXTSMITH_DATABASE_URL),$(CONTEXTSMITH_DATABASE_URL),postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(SOURCEBRIEF_POSTGRES_PORT)/$(POSTGRES_DB)))
 export PYTHONPATH := apps/api:packages/shared:packages/worker
 
-.PHONY: help quickstart-doctor quickstart-ready print-api-url print-web-url venv web-deps lint typecheck test test-integration compose-up compose-down compose-ps compose-logs migrate migrate-compose qa-smoke alpha-eval collect-e2e-evidence release-gate verify clean prepare-qa-fixtures
+.PHONY: help quickstart-doctor quickstart-ready print-api-url print-web-url venv web-deps lint typecheck test test-integration compose-up compose-down compose-ps compose-logs migrate migrate-compose qa-smoke alpha-eval launch-security-probe collect-e2e-evidence release-gate verify clean prepare-qa-fixtures
 
 help:
 	@printf 'SourceBrief common commands\n\n'
@@ -34,6 +34,7 @@ help:
 	@printf '  make test-integration       Integration tests against real services\n'
 	@printf '  make qa-smoke               Run the real API/worker/frontend smoke flow\n'
 	@printf '  make alpha-eval             Run natural-language alpha retrieval eval\n'
+	@printf '  make launch-security-probe Collect security/failure-mode proof from a live stack\n'
 	@printf '  make collect-e2e-evidence   Write a redacted launch evidence bundle under artifacts/e2e/\n'
 	@printf '  make verify                 Full local acceptance/release gate\n'
 	@printf '  make clean                  Remove local Python/tool caches\n'
@@ -101,6 +102,11 @@ qa-smoke: venv compose-up
 alpha-eval: venv compose-up
 	$(BIN)/python scripts/wait_for_http.py $(API_URL)/readyz 120
 	API_URL=$(API_URL) SOURCEBRIEF_API_URL=$(API_URL) $(BIN)/python scripts/alpha_eval.py
+
+launch-security-probe: venv prepare-qa-fixtures
+	SOURCEBRIEF_DEV_AUTH=true $(COMPOSE) up -d --build
+	$(BIN)/python scripts/wait_for_http.py $(API_URL)/readyz 120
+	API_URL=$(API_URL) WEB_URL=$(WEB_URL) SOURCEBRIEF_API_URL=$(API_URL) SOURCEBRIEF_WEB_URL=$(WEB_URL) COMPOSE_PROJECT_NAME=$(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(BIN)/python scripts/launch_security_probe.py --dev-auth-email launch-security-probe@example.com --compose-project-name $(or $(COMPOSE_PROJECT_NAME),sourcebrief)
 
 collect-e2e-evidence: venv
 	$(BIN)/python scripts/collect_e2e_evidence.py
