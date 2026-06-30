@@ -22,6 +22,7 @@ make migrate
 python scripts/collect_e2e_evidence.py \
   --command 'make qa-smoke' \
   --command 'make alpha-eval' \
+  --command 'make launch-security-probe' \
   --include-file alpha-eval=artifacts/alpha-eval-report.json
 ```
 
@@ -59,12 +60,39 @@ The collector records:
 - optional command transcripts with exit codes;
 - optional included files such as `artifacts/alpha-eval-report.json`.
 
-Example with additional proof files and command transcripts:
+## Launch security/failure-mode probe
+
+Issue #218 readiness uses `make launch-security-probe` as the live security/observability/failure-mode gate. The command writes `artifacts/e2e/<run-id>/launch-security-probe.json` and exercises a disposable workspace/project/resource set against the API:
+
+- invalid-login failure shape;
+- provider health;
+- scoped runtime token allow path for `agent-context`;
+- cross-project, cross-resource, MCP project-scope, and missing-scope denials;
+- scoped probe-token revocation after evidence capture;
+- successful queue/index-run status plus per-resource index-run observability;
+- audit-event visibility for admin users;
+- no-source/no-snapshot and false-premise behavior;
+- failed import validation;
+- optional Docker service logs when `COMPOSE_PROJECT_NAME` is provided;
+- optional browser console/network transcript scan when `--browser-transcript` is provided.
+
+The probe returns `PASS` only when all required checks pass. It returns `RISK` if a current run omits browser console/network proof or service-log capture; that is acceptable for preserving partial evidence, but launch readiness still needs the browser proof from #210/#213.
+
+Run it directly when debugging the security gate:
+
+```bash
+make launch-security-probe
+```
+
+For an externally authenticated stack, call the script directly with `--token-env` or `--email --password-env` instead of the dev-auth Make target.
+
+## Example with additional proof commands
 
 ```bash
 python scripts/collect_e2e_evidence.py \
   --command 'make qa-smoke' \
   --command 'make alpha-eval' \
+  --command 'make launch-security-probe' \
   --include-file alpha-eval=artifacts/alpha-eval-report.json
 ```
 
