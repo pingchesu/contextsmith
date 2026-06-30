@@ -137,3 +137,71 @@ def test_launch_security_probe_make_target_does_not_enable_dev_auth_by_default()
     assert "--dev-auth-email" not in target
     assert "--email" in target
     assert "LAUNCH_SECURITY_BROWSER_TRANSCRIPT" in target
+
+
+def test_launch_security_probe_marker_check_rejects_answer_only_echo() -> None:
+    probe = _load_probe_module()
+
+    answer_only_echo = {
+        "query": probe.MARKER,
+        "answer": f"The answer repeats {probe.MARKER} but retrieval did not find it.",
+        "citations": [{"resource_id": "res-a", "snippet": "unrelated content"}],
+    }
+
+    assert not probe.response_contains_marker_evidence(answer_only_echo, probe.MARKER)
+
+
+def test_launch_security_probe_redacts_quoted_secret_values_with_spaces() -> None:
+    probe = _load_probe_module()
+
+    raw = '{"password":"hello world", "client_secret": "two words"} password="three words"'
+    counts = probe.scan_public_artifact(raw)
+    redacted = probe.redact_text(raw)
+
+    assert counts["secret_assignment"] == 3
+    assert "hello world" not in redacted
+    assert "two words" not in redacted
+    assert "three words" not in redacted
+    assert probe.scan_public_artifact(redacted)["secret_assignment"] == 0
+
+
+def test_launch_security_probe_browser_transcript_accepts_common_json_shapes() -> None:
+    probe = _load_probe_module()
+
+    assert probe.analyze_browser_transcript('[{"type":"error","text":"boom"}]')["status"] == "block"
+    assert probe.analyze_browser_transcript('{"console":[{"level":"error","text":"boom"}]}')["status"] == "block"
+    assert probe.analyze_browser_transcript('{"network":[{"url":"/api","status":500}]}')["status"] == "block"
+    assert probe.analyze_browser_transcript('{"network":[{"url":"/api","failed":true}]}')["status"] == "block"
+
+
+def test_launch_security_probe_make_target_preserves_contextsmith_admin_fallback() -> None:
+    import os
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env.update(
+        {
+            "SOURCEBRIEF_ADMIN_EMAIL": "",
+            "SOURCEBRIEF_ADMIN_PASSWORD": "",
+            "CONTEXTSMITH_ADMIN_EMAIL": "legacy-admin@example.com",
+            "CONTEXTSMITH_ADMIN_PASSWORD": "legacy-password",
+        }
+    )
+    output = subprocess.check_output(
+        [
+            "make",
+            "-n",
+            "SOURCEBRIEF_ADMIN_EMAIL=",
+            "SOURCEBRIEF_ADMIN_PASSWORD=",
+            "CONTEXTSMITH_ADMIN_EMAIL=legacy-admin@example.com",
+            "CONTEXTSMITH_ADMIN_PASSWORD=legacy-password",
+            "launch-security-probe",
+        ],
+        cwd=root,
+        env=env,
+        text=True,
+    )
+
+    assert "--email 'legacy-admin@example.com'" in output
+    assert "--password-env CONTEXTSMITH_ADMIN_PASSWORD" in output

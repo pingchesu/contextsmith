@@ -15,6 +15,8 @@ POSTGRES_DB ?= sourcebrief
 API_URL ?= http://localhost:$(SOURCEBRIEF_API_PORT)
 WEB_URL ?= http://localhost:$(SOURCEBRIEF_WEB_PORT)
 DATABASE_URL ?= $(if $(SOURCEBRIEF_DATABASE_URL),$(SOURCEBRIEF_DATABASE_URL),$(if $(CONTEXTSMITH_DATABASE_URL),$(CONTEXTSMITH_DATABASE_URL),postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(SOURCEBRIEF_POSTGRES_PORT)/$(POSTGRES_DB)))
+LAUNCH_SECURITY_ADMIN_EMAIL ?= $(or $(SOURCEBRIEF_ADMIN_EMAIL),$(CONTEXTSMITH_ADMIN_EMAIL))
+LAUNCH_SECURITY_ADMIN_PASSWORD_ENV ?= $(if $(SOURCEBRIEF_ADMIN_PASSWORD),SOURCEBRIEF_ADMIN_PASSWORD,$(if $(CONTEXTSMITH_ADMIN_PASSWORD),CONTEXTSMITH_ADMIN_PASSWORD,SOURCEBRIEF_ADMIN_PASSWORD))
 export PYTHONPATH := apps/api:packages/shared:packages/worker
 
 .PHONY: help quickstart-doctor quickstart-ready print-api-url print-web-url venv web-deps lint typecheck test test-integration compose-up compose-down compose-ps compose-logs migrate migrate-compose qa-smoke alpha-eval launch-security-probe collect-e2e-evidence release-gate verify clean prepare-qa-fixtures
@@ -106,7 +108,7 @@ alpha-eval: venv compose-up
 launch-security-probe: venv prepare-qa-fixtures
 	$(COMPOSE) up -d --build
 	$(BIN)/python scripts/wait_for_http.py $(API_URL)/readyz 120
-	API_URL=$(API_URL) WEB_URL=$(WEB_URL) SOURCEBRIEF_API_URL=$(API_URL) SOURCEBRIEF_WEB_URL=$(WEB_URL) COMPOSE_PROJECT_NAME=$(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(BIN)/python scripts/launch_security_probe.py --email '$(SOURCEBRIEF_ADMIN_EMAIL)' --compose-project-name $(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(if $(LAUNCH_SECURITY_BROWSER_TRANSCRIPT),--browser-transcript $(LAUNCH_SECURITY_BROWSER_TRANSCRIPT),)
+	API_URL=$(API_URL) WEB_URL=$(WEB_URL) SOURCEBRIEF_API_URL=$(API_URL) SOURCEBRIEF_WEB_URL=$(WEB_URL) COMPOSE_PROJECT_NAME=$(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(BIN)/python scripts/launch_security_probe.py --email '$(LAUNCH_SECURITY_ADMIN_EMAIL)' --password-env $(LAUNCH_SECURITY_ADMIN_PASSWORD_ENV) --compose-project-name $(or $(COMPOSE_PROJECT_NAME),sourcebrief) $(if $(LAUNCH_SECURITY_BROWSER_TRANSCRIPT),--browser-transcript $(LAUNCH_SECURITY_BROWSER_TRANSCRIPT),)
 
 collect-e2e-evidence: venv
 	$(BIN)/python scripts/collect_e2e_evidence.py

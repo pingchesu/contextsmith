@@ -1,12 +1,12 @@
 # Self-improvement browser launch proof (#213)
 
-Issue: [#213](https://github.com/pingchesu/sourcebrief/issues/213)
-Parent: [#208](https://github.com/pingchesu/sourcebrief/issues/208)
-Resolved setup findings: [#231](https://github.com/pingchesu/sourcebrief/issues/231), [#237](https://github.com/pingchesu/sourcebrief/issues/237)
+Issue: #213
+Parent: #208
+Resolved setup findings: #231, #237
 
 ## Verdict
 
-**PASS for #213 UI/browser evidence, with one tracked setup finding.**
+**PASS for #213 UI/browser evidence, with resolved setup findings.**
 
 The `/self-improvement` product surface was browser-verified on the current launch stack after fixing the local proof-stack CORS origin. The page demonstrates the intended **artifact-first / dry-run / no-silent-mutation** boundary and should remain worded as a review/evidence surface, not as recurring autonomous learning that silently changes product behavior.
 
