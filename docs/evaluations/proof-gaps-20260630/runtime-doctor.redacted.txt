@@ -1,0 +1,41 @@
+$ <local-path> --api-url http://localhost:<port> --json doctor --workspace 50Q Launch Walkthrough 1782835809 --project SourceBrief 50Q Product Walkthrough --query SourceBrief runtime install plan --runtime hermes
+exit_code=0
+
+STDOUT
+{
+  "checks": [
+    {
+      "api_url": "http://localhost:<port>",
+      "name": "api",
+      "response": {
+        "status": "ready"
+      },
+      "status": "passed"
+    },
+    {
+      "email": "launch50q-210-20260630160727@example.com",
+      "message": "auth mode selected; authenticated project/MCP checks below prove access",
+      "mode": "session_login_env",
+      "name": "auth_mode",
+      "password_env_set": true,
+      "status": "info",
+      "token_set": true
+    },
+    {
+      "name": "project",
+      "project_id": "<id>",
+      "resource_count": 1,
+      "status": "passed",
+      "workspace_id": "<id>"
+    },
+    {
+      "has_result": true,
+      "name": "mcp_context",
+      "query": "SourceBrief runtime install plan",
+      "status": "passed"
+    }
+  ],
+  "status": "passed"
+}
+
+STDERR

@@ -97,9 +97,9 @@ These are intentionally not faked in the current docs.
 
 | Gap | Current status | Follow-up |
 | --- | --- | --- |
-| Resource Map rendered output | Real behavior is covered by API/integration paths, but no committed human-facing screenshot/output excerpt yet. | Capture Resource Map UI/API output from a real local run. |
-| Context Pack rendered output | Context Pack behavior is covered by real integration tests, but no committed response excerpt yet. | Capture `get_context_pack` and pack-scoped `ask` output with normalized IDs. |
-| Skill Export package example | Product behavior exists, but no committed approved export file tree/output excerpt yet. | Capture a real approved export manifest and validation report with IDs normalized. |
-| Runtime doctor terminal transcript | CLI behavior is covered by tests and PR proof, but no stable committed transcript yet. | Capture `sourcebrief doctor --query` and `runtime setup hermes --dry-run` output from a clean local run. |
+| Resource Map rendered output | Closed by [`evaluations/proof-gaps-20260630/README.md`](evaluations/proof-gaps-20260630/README.md): current local run compiled and approved Resource Map output with redacted JSON artifact and checksum. | Keep redacted artifact refreshed with future launch candidates. |
+| Context Pack rendered output | Closed by [`evaluations/proof-gaps-20260630/context-pack.redacted.json`](evaluations/proof-gaps-20260630/context-pack.redacted.json): Resource Map artifact was published into Context Pack `launch-proof-212` v1. | Keep pack proof paired with Resource Map source artifact. |
+| Skill Export package example | Blocked in current proof: export validation passed, but leak scan failed on generated package references, so no approved/downloadable package is committed. | Follow-up #226 tracks package leak-scan/redaction before launch signoff. |
+| Runtime doctor terminal transcript | Closed by [`evaluations/proof-gaps-20260630/runtime-doctor.redacted.txt`](evaluations/proof-gaps-20260630/runtime-doctor.redacted.txt): CLI doctor resolved named workspace/project and exited 0. | Re-run when runtime setup/doctor behavior changes. |
 
 When adding one of these artifacts, include the command, stack assumptions, redaction policy, and what would fail if the feature regressed.

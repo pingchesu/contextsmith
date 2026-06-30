@@ -1,0 +1,173 @@
+{
+  "artifacts": [
+    {
+      "artifact_hash": "sha256:f08580d18d6b670e1c5499042b0f244b4ac38bb15dc7f9197bc7dccc03f818c5",
+      "artifact_status": "approved",
+      "artifact_title": "Resource Map · SourceBrief repository launch import",
+      "artifact_type": "resource_map",
+      "citations": [
+        {
+          "content_hash": "sha256:551b2a7885fce98fb42e7461b76586df33636eaf8e566030fb61b340bc276402",
+          "id": "<id>",
+          "line_end": 4,
+          "line_start": 1,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 0,
+          "title": "SourceBrief Agent Development Guide"
+        },
+        {
+          "content_hash": "sha256:ff0503e405e53d013d44b9e70eaa5650caf5145f778889e7ed3035c37bf577b0",
+          "id": "<id>",
+          "line_end": 16,
+          "line_start": 5,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 1,
+          "title": "Product bar"
+        },
+        {
+          "content_hash": "sha256:c0a6c01527cbdffddb1e8787612c4f0a90de16f75b8008b0d0efea008ac95697",
+          "id": "<id>",
+          "line_end": 32,
+          "line_start": 17,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 2,
+          "title": "Required development workflow"
+        },
+        {
+          "content_hash": "sha256:7b033e7904a0cde875f9c72623985f1de4c3cf62359d905b720ea2f651efde47",
+          "id": "<id>",
+          "line_end": 56,
+          "line_start": 33,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 3,
+          "title": "Claude Code usage"
+        },
+        {
+          "content_hash": "sha256:db861e1711c4ca84c929e27146eb3a53a83e272f4ff09506d2d571198e162b31",
+          "id": "<id>",
+          "line_end": 72,
+          "line_start": 57,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 4,
+          "title": "Hermes adversarial review"
+        },
+        {
+          "content_hash": "sha256:dfdf448f914a252731ea5bfa210ab81deda237c517dde2b8155ee2c20d3bb43d",
+          "id": "<id>",
+          "line_end": 133,
+          "line_start": 73,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 5,
+          "title": "Verification gates"
+        },
+        {
+          "content_hash": "sha256:fa9c7279a330315e564779c95affc7aa7b142af55b63dd38a0cccf54b7724ed8",
+          "id": "<id>",
+          "line_end": 146,
+          "line_start": 134,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 6,
+          "title": "No-mock policy"
+        },
+        {
+          "content_hash": "sha256:74dc9cc5242b19df0b297390b8af91c73d5d6ad5bc2ff3619c368cf85427287a",
+          "id": "<id>",
+          "line_end": 187,
+          "line_start": 147,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 7,
+          "title": "GitHub and PR operations"
+        },
+        {
+          "content_hash": "sha256:9808c489e48fdab31a704f7b6e70396cbbb912925d2cde4543c41847a234fb12",
+          "id": "<id>",
+          "line_end": 212,
+          "line_start": 188,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 8,
+          "title": "SourceBrief repo conventions"
+        },
+        {
+          "content_hash": "sha256:7733854483b7bc84bf378039567e95a361db26574f19f0b3470e1682a83fa5e0",
+          "id": "<id>",
+          "line_end": 233,
+          "line_start": 213,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 9,
+          "title": "Frontend product standards"
+        },
+        {
+          "content_hash": "sha256:151a00dc6b9dfb76b8c12875ecb02a98fe4a7a085deddb00d917f9a1e0481750",
+          "id": "<id>",
+          "line_end": 247,
+          "line_start": 234,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 10,
+          "title": "Operational boundaries"
+        },
+        {
+          "content_hash": "sha256:7f63e21a44f50415beef79c86481ef56634789210559f06a776fd11c10875888",
+          "id": "<id>",
+          "line_end": 258,
+          "line_start": 248,
+          "normalized_path": "AGENTS.md",
+          "ordinal": 11,
+          "title": "Communication style"
+        }
+      ],
+      "context_artifact_id": "<id>",
+      "id": "<id>",
+      "ordinal": 0,
+      "resource_id": "<id>",
+      "resource_manifest_id": "<id>",
+      "resource_name": "SourceBrief repository launch import",
+      "source_snapshot_id": "<id>"
+    }
+  ],
+  "coverage": [
+    {
+      "artifact_count": 1,
+      "citation_count": 2203,
+      "id": "<id>",
+      "resource_id": "<id>",
+      "resource_manifest_id": "<id>",
+      "resource_name": "SourceBrief repository launch import",
+      "source_family_label": null,
+      "source_snapshot_id": "<id>"
+    }
+  ],
+  "coverage_json": {
+    "artifact_count": 1,
+    "coverage": [
+      {
+        "artifact_count": 1,
+        "artifact_types": [
+          "resource_map"
+        ],
+        "citation_count": 2203,
+        "resource_id": "<id>",
+        "resource_manifest_id": "<id>",
+        "source_snapshot_id": "<id>"
+      }
+    ],
+    "resource_count": 1,
+    "snapshot_count": 1
+  },
+  "created_at": "2026-06-30T16:32:20.998836Z",
+  "description": "Current proof artifact pack for #212",
+  "id": "<id>",
+  "invalidated_at": null,
+  "pack_hash": "sha256:ff9b59ed39955a33f75fa2eb99e7eb32d774ae36ec72f29498e9d3fa550c21bf",
+  "pack_key": "launch-proof-212",
+  "published_at": "2026-06-30T16:32:21.083761Z",
+  "rolled_back_at": null,
+  "status": "published",
+  "status_reason": "#212 launch proof capture",
+  "title": "Launch proof #212 context pack",
+  "validation_json": {
+    "errors": [],
+    "ok": true,
+    "warnings": []
+  },
+  "version": 1
+}
