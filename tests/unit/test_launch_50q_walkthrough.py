@@ -344,3 +344,49 @@ def test_launch_50q_browser_session_requirement_fails_before_project_creation(mo
         module.main()
 
     assert "create_walkthrough_project" not in calls
+
+
+def test_launch_50q_cors_preflight_requires_active_random_web_origin(monkeypatch) -> None:
+    module = load_module()
+    env_file = {"SOURCEBRIEF_CORS_ORIGINS": "http://localhost:13000,http://127.0.0.1:13000"}
+    monkeypatch.delenv("SOURCEBRIEF_CORS_ORIGINS", raising=False)
+
+    with pytest.raises(RuntimeError, match="active web origin http://localhost:34915"):
+        module.validate_browser_cors_origin("http://localhost:34915/self-improvement", env_file)
+
+
+def test_launch_50q_cors_preflight_accepts_active_random_web_origin(monkeypatch) -> None:
+    module = load_module()
+    env_file = {"SOURCEBRIEF_CORS_ORIGINS": "http://localhost:34915, http://127.0.0.1:34915/"}
+    monkeypatch.delenv("SOURCEBRIEF_CORS_ORIGINS", raising=False)
+
+    module.validate_browser_cors_origin("http://localhost:34915/login", env_file)
+
+
+def test_launch_50q_cors_preflight_runs_before_compose(monkeypatch, tmp_path: Path) -> None:
+    module = load_module()
+    calls: list[str] = []
+
+    class Args:
+        artifact_dir = tmp_path
+        question_bank = QUESTIONS
+        question_limit = 50
+        skip_compose = False
+        skip_screenshots = False
+        allow_risk = False
+        api_url = "http://api"
+        web_url = "http://localhost:34915"
+
+    monkeypatch.setattr(module.argparse.ArgumentParser, "parse_args", lambda self: Args())
+    monkeypatch.setattr(module, "load_env_file", lambda path: {"SOURCEBRIEF_CORS_ORIGINS": "http://localhost:13000"})
+
+    def run_should_not_execute(*args, **kwargs):  # noqa: ANN002, ANN003
+        calls.append("compose")
+        raise AssertionError("compose must not run before CORS preflight")
+
+    monkeypatch.setattr(module, "run", run_should_not_execute)
+
+    with pytest.raises(RuntimeError, match="SOURCEBRIEF_CORS_ORIGINS"):
+        module.main()
+
+    assert calls == []
