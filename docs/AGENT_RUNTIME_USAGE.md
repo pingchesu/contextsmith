@@ -313,7 +313,7 @@ Runtime setup should be boring and reversible: generate a plan, inspect config a
 
 ### Validate the MCP integration first
 
-SourceBrief ships an operational validator that checks REST `agent-context`, MCP `initialize`, MCP `tools/list`, MCP `tools/call`, read-only denial behavior, and citation consistency.
+Use `sourcebrief doctor` as a lightweight API/project/MCP-context smoke test. It checks API readiness, resolves the selected workspace/project, verifies project resources are visible, and can make one `sourcebrief.get_agent_context`-style MCP context call when `--query` is provided.
 
 ```bash
 sourcebrief doctor \
@@ -323,7 +323,14 @@ sourcebrief doctor \
   --runtime hermes
 ```
 
-For a full generated MCP config/validator bundle, run `sourcebrief runtime plan` with the same workspace/project names and inspect the returned validator command. The validator output includes `hermes_config.mcp_servers` and redacts the token when configured with redaction flags.
+For full runtime validation, generate a plan and inspect/run its validator command instead of treating `doctor` as the complete gate. The generated validator path covers REST `agent-context`, MCP `initialize`, MCP `tools/list`, MCP `tools/call`, read-only denial behavior, and citation consistency; it also emits `hermes_config.mcp_servers` and redacts the token when configured with redaction flags.
+
+```bash
+sourcebrief runtime plan \
+  --workspace "SourceBrief CLI Demo" \
+  --project "First useful moment" \
+  --runtime hermes
+```
 
 The validator's default minted token is enough for `sourcebrief.get_agent_context`. If you also want remote code drilldown tools (`search_code`, `grep_code`, `read_file`, `find_symbol`), create a token with `code:read` and pass it with `--token "$SB_TOKEN"`.
 

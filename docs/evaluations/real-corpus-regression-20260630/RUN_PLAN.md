@@ -56,7 +56,10 @@ These providers are acceptable for regression evidence but not launch-ready qual
 ## Commands to run
 
 ```bash
-source /tmp/sourcebrief-210-run.env
+# Load the ignored local proof-stack environment for the active run.
+# The file contains browser-visible API/web URLs, random ports, and local credentials;
+# do not commit the concrete env-file path or its values.
+source <local-proof-stack-env>
 OUT="artifacts/e2e/214-$(date -u +%Y%m%d%H%M%S)-awesome-agent-harness"
 SOURCEBRIEF_API_URL="$SOURCEBRIEF_API_URL" SOURCEBRIEF_WEB_URL="$SOURCEBRIEF_WEB_URL" \
   python scripts/run_awesome_agent_harness_eval.py \
