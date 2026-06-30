@@ -27,7 +27,7 @@ SourceBrief alpha is an open-source, multi-tenant, project-based context platfor
 - Central MCP endpoint exposing context/source-intelligence tools plus opt-in patch proposal and PR approval records.
 - Artifact-first self-improvement API/CLI/UI loop with review bundles, deterministic reviewer reports, regression proposals, validation gates, staged receipts, redacted history, and no-silent-mutation boundaries.
 
-### SaaS/ops surface
+### Local web/ops alpha surface
 
 - Next.js alpha web console for workspace/project/resource/token/review/agent flows, including Quality and Self-improvement pages.
 - Scoped API tokens with allowlists for workspace/project/resource boundaries.
