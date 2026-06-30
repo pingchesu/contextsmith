@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -101,6 +102,31 @@ def configured_url(kind: str, env_file: dict[str, str]) -> str:
         explicit = env_value("SOURCEBRIEF_WEB_URL", env_file) or env_value("WEB_URL", env_file)
         port = env_value("SOURCEBRIEF_WEB_PORT", env_file) or env_value("CONTEXTSMITH_WEB_PORT", env_file) or "13000"
     return (explicit or f"http://localhost:{port}").rstrip("/")
+
+
+def browser_origin(url: str) -> str:
+    parsed = urlparse(url.rstrip("/"))
+    if not parsed.scheme or not parsed.netloc:
+        raise RuntimeError(f"browser proof web URL must include scheme/host/port: {url}")
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
+def configured_cors_origins(env_file: dict[str, str]) -> set[str]:
+    raw = env_value("SOURCEBRIEF_CORS_ORIGINS", env_file) or env_value("CONTEXTSMITH_CORS_ORIGINS", env_file) or ""
+    return {item.strip().rstrip("/") for item in raw.split(",") if item.strip()}
+
+
+def validate_browser_cors_origin(web_url: str, env_file: dict[str, str]) -> None:
+    origin = browser_origin(web_url)
+    origins = configured_cors_origins(env_file)
+    if "*" in origins or origin in origins:
+        return
+    configured = ",".join(sorted(origins)) if origins else "<empty>"
+    raise RuntimeError(
+        "browser screenshot proof requires SOURCEBRIEF_CORS_ORIGINS to include "
+        f"the active web origin {origin}; configured origins: {configured}. "
+        "Set SOURCEBRIEF_CORS_ORIGINS before compose/build so API CORS matches random proof ports."
+    )
 
 
 def default_artifact_dir(ts: int) -> Path:
@@ -603,6 +629,8 @@ def main() -> int:
     args.web_url = (args.web_url or configured_url("web", env_file)).rstrip("/")
     artifact_dir = (args.artifact_dir or default_artifact_dir(ts)).resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    if not args.skip_screenshots:
+        validate_browser_cors_origin(args.web_url, env_file)
     if not args.skip_compose:
         run(["make", "compose-up"])
     wait_http(f"{args.api_url}/readyz")

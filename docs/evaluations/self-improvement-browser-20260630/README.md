@@ -2,7 +2,7 @@
 
 Issue: [#213](https://github.com/pingchesu/sourcebrief/issues/213)
 Parent: [#208](https://github.com/pingchesu/sourcebrief/issues/208)
-Child findings: [#231](https://github.com/pingchesu/sourcebrief/issues/231), [#237](https://github.com/pingchesu/sourcebrief/issues/237)
+Resolved setup findings: [#231](https://github.com/pingchesu/sourcebrief/issues/231), [#237](https://github.com/pingchesu/sourcebrief/issues/237)
 
 ## Verdict
 
@@ -37,7 +37,7 @@ The `/self-improvement` product surface was browser-verified on the current laun
 
 First browser login attempt failed with `TypeError: Failed to fetch`; API logs showed the CORS preflight for login returned `400 Bad Request`. The evidence stack had been rebuilt on random ports and API CORS did not include the active web origin.
 
-This was fixed for the proof run by restarting only the isolated local API/worker services with the active web origin in `SOURCEBRIEF_CORS_ORIGINS`. The failure is tracked as [#231](https://github.com/pingchesu/sourcebrief/issues/231) so future random-port browser proof stacks validate CORS before screenshot capture.
+This was fixed for the proof run by restarting only the isolated local API/worker services with the active web origin in `SOURCEBRIEF_CORS_ORIGINS`. The launch/browser proof runner now validates the active web origin before screenshot capture so future random-port browser proof stacks fail fast instead of producing browser CORS noise.
 
 ## Evidence files
 
