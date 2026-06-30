@@ -1,0 +1,43 @@
+{
+  "context_pack": {
+    "artifact_count": 1,
+    "coverage_count": 1,
+    "pack_hash": "sha256:ff9b59ed39955a33f75fa2eb99e7eb32d774ae36ec72f29498e9d3fa550c21bf",
+    "pack_key": "launch-proof-212",
+    "status": "published",
+    "version": 1
+  },
+  "project_name": "SourceBrief 50Q Product Walkthrough",
+  "resource_map": {
+    "artifact_hash": "sha256:f08580d18d6b670e1c5499042b0f244b4ac38bb15dc7f9197bc7dccc03f818c5",
+    "artifact_type": "resource_map",
+    "citation_count": 2203,
+    "source_count": 313,
+    "status": "approved"
+  },
+  "resource_name": "SourceBrief repository launch import",
+  "run_id": "212-20260630",
+  "runtime_doctor": {
+    "exit_code": 0
+  },
+  "skill_export": {
+    "blocker": [
+      {
+        "code": "forbidden_pattern",
+        "message": "<token-like-pattern>",
+        "path": "references/data-structure.md"
+      },
+      {
+        "code": "forbidden_pattern",
+        "message": "<local-path-pattern>",
+        "path": "references/resource-map.md"
+      }
+    ],
+    "file_count": 0,
+    "leak_scan_ok": false,
+    "package_hash": "sha256:d37737030267f32a5e8c73e471cade0f37776b16cc29decb2d9fa38a2aee7e06",
+    "status": "failed",
+    "validation_ok": true
+  },
+  "workspace_name": "50Q Launch Walkthrough 1782835809"
+}

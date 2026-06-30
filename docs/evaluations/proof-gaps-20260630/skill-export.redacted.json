@@ -1,0 +1,102 @@
+{
+  "approved_at": null,
+  "context_pack_version_id": "<id>",
+  "created_at": "2026-06-30T16:32:21.113722Z",
+  "export_type": "hermes_skill",
+  "export_version": 1,
+  "files": [],
+  "id": "<id>",
+  "invalidated_at": null,
+  "leak_scan_json": {
+    "findings": [
+      {
+        "code": "forbidden_pattern",
+        "message": "<token-like-pattern>",
+        "path": "references/data-structure.md"
+      },
+      {
+        "code": "forbidden_pattern",
+        "message": "<local-path-pattern>",
+        "path": "references/resource-map.md"
+      }
+    ],
+    "ok": false
+  },
+  "manifest_json": {
+    "failed": true,
+    "leak_scan": {
+      "findings": [
+        {
+          "code": "forbidden_pattern",
+          "message": "<token-like-pattern>",
+          "path": "references/data-structure.md"
+        },
+        {
+          "code": "forbidden_pattern",
+          "message": "<local-path-pattern>",
+          "path": "references/resource-map.md"
+        }
+      ],
+      "ok": false
+    },
+    "package_hash": "sha256:d37737030267f32a5e8c73e471cade0f37776b16cc29decb2d9fa38a2aee7e06",
+    "validation": {
+      "errors": [],
+      "file_count": 18,
+      "ok": true,
+      "required_files": [
+        "README.md",
+        "SKILL.md",
+        "examples/smoke-queries.md",
+        "manifest.json",
+        "references/citation-policy.md",
+        "references/data-structure.md",
+        "references/freshness.md",
+        "references/glossary.md",
+        "references/patterns.md",
+        "references/pitfalls.md",
+        "references/resource-map.md",
+        "references/source-coverage.md",
+        "references/task-playbooks/architecture-question.md",
+        "references/task-playbooks/change-impact.md",
+        "references/task-playbooks/debugging.md",
+        "references/task-playbooks/onboarding.md",
+        "references/task-routes.md",
+        "scripts/verify-sourcebrief-runtime.sh"
+      ]
+    }
+  },
+  "pack_key": "launch-proof-212",
+  "pack_version": 1,
+  "package_hash": "sha256:d37737030267f32a5e8c73e471cade0f37776b16cc29decb2d9fa38a2aee7e06",
+  "rejected_at": null,
+  "review_comment": null,
+  "status": "failed",
+  "summary": "Redacted #212 launch proof skill package generated from current context pack.",
+  "title": "SourceBrief launch proof skill export",
+  "validation_json": {
+    "errors": [],
+    "file_count": 18,
+    "ok": true,
+    "required_files": [
+      "README.md",
+      "SKILL.md",
+      "examples/smoke-queries.md",
+      "manifest.json",
+      "references/citation-policy.md",
+      "references/data-structure.md",
+      "references/freshness.md",
+      "references/glossary.md",
+      "references/patterns.md",
+      "references/pitfalls.md",
+      "references/resource-map.md",
+      "references/source-coverage.md",
+      "references/task-playbooks/architecture-question.md",
+      "references/task-playbooks/change-impact.md",
+      "references/task-playbooks/debugging.md",
+      "references/task-playbooks/onboarding.md",
+      "references/task-routes.md",
+      "scripts/verify-sourcebrief-runtime.sh"
+    ]
+  }
+}
