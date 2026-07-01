@@ -16,9 +16,21 @@ A useful SourceBrief setup has three pieces:
 | --- | --- |
 | **Cited evidence service** | MCP/API/CLI answers that point back to exact source sections. |
 | **Human workbench** | Web UI for sources, indexing state, review, and cited questions. |
-| **Agent pack** | Hermes skill packs and MCP/runtime guidance that teach agents when to ask SourceBrief first. Claude, Codex, Cursor, and other MCP clients use the same cited evidence service through their runtime setup paths. |
+| **Agent Pack** | Repo/Project Agent runtime adapters, Skill Exports, and MCP/runtime guidance that teach agents when to ask SourceBrief first. Claude, Codex, Cursor, Hermes, and other MCP clients use the same cited evidence service through their runtime setup paths. |
 
-[Start here](docs/INSTALL_AND_USE.md) · [See the walkthrough](docs/WALKTHROUGH.md) · [Recipes](docs/RECIPES.md) · [Use it with agents](docs/AGENT_RUNTIME_USAGE.md) · [Contribute](CONTRIBUTING.md)
+[Start here](docs/INSTALL_AND_USE.md) · [See the walkthrough](docs/WALKTHROUGH.md) · [Recipes](docs/RECIPES.md) · [Agent Packs](docs/AGENT_PACKS.md) · [Use it with agents](docs/AGENT_RUNTIME_USAGE.md) · [Contribute](CONTRIBUTING.md)
+
+## Agent Pack install model
+
+SourceBrief's default runtime package is **remote-live**: install the adapter, not the corpus. A Repo/Project Agent is the user-facing published runtime view; an Agent Pack / Skill Pack is the small local adapter that teaches Hermes, Claude, Codex, Cursor, or another MCP client how to ask SourceBrief for current cited evidence.
+
+```text
+Review graph -> Publish Agent -> Install Agent Pack -> Validate Runtime
+```
+
+`sourcebrief agent-pack doctor --package ...` now validates package integrity and manifest policy locally. Add `--query` only when you want the optional remote citation smoke. Explicit non-default modes are modeled too: `pinned-snapshot` is bounded/offline-but-not-current, while `local-mirror` is exceptional policy validation only. SourceBrief does not sync full sources, embeddings, or graph indexes as a side effect of normal install.
+
+Read the full contract in [Agent Packs](docs/AGENT_PACKS.md).
 
 <img src="docs/assets/sourcebrief-mental-model.svg" alt="SourceBrief mental model from sources to snapshots to reviewed evidence to MCP/API agent access" width="100%" />
 
@@ -309,7 +321,7 @@ make verify     # full local acceptance gate
 
 SourceBrief analyzes only the sources you connect or upload. Use built-in skip rules, bounded import settings, and redaction checks to reduce accidental indexing of secrets, vendored code, generated files, or private material.
 
-Generated Skill Packs and runtime adapters should point agents back to SourceBrief citations. They should not embed an entire private source corpus.
+Generated Agent Packs / Skill Exports and runtime adapters should point agents back to SourceBrief citations. They should not embed an entire private source corpus by default; only explicit non-default modes such as bounded `pinned-snapshot` or exceptional `local-mirror` policy validation may declare local payloads.
 
 ## License
 
