@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Literal
 
 from sourcebrief_cli import agent_pack_doctor, runtime_apply, skill_install
 from sourcebrief_cli import auth as cli_auth
+from sourcebrief_cli import resources as cli_resources
 from sourcebrief_cli import scope as cli_scope
+from sourcebrief_cli import support as cli_support
 from sourcebrief_cli.client import SourceBriefClient, SourceBriefCliError
 from sourcebrief_cli.config import (
     SESSION_EMAIL_CONFIG_KEY,
@@ -43,7 +43,6 @@ from sourcebrief_shared.regression_proposal import (
     write_regression_proposal,
 )
 from sourcebrief_shared.review_bundle import (
-    build_review_bundle_from_agent_context,
     write_review_bundle,
 )
 from sourcebrief_shared.review_history import scan_review_history, show_review_history_record
@@ -91,46 +90,53 @@ _apply_selected_defaults = cli_scope.apply_selected_defaults
 _resolve_api_url = cli_scope.resolve_api_url
 _resolve_email = cli_scope.resolve_email
 _require_scope = cli_scope.require_scope
+_print_json = cli_support.print_json
+_print_kv = cli_support.print_kv
+_resource_ids = cli_support.resource_ids
+_resource_refs = cli_support.resource_refs
+_apply_resource_refs = cli_support.apply_resource_refs
+_split_csv_or_repeated = cli_support.split_csv_or_repeated
+_wait_for_run = cli_support.wait_for_run
+_check_result = cli_support.check_result
+_mcp_error_message = cli_support.mcp_error_message
+_mcp_structured_payload = cli_support.mcp_structured_payload
+_mcp_citation_count = cli_support.mcp_citation_count
+_maybe_refresh = cli_support.maybe_refresh
+_pick_answer_lines = cli_support.pick_answer_lines
+_human_answer_brief = cli_support.human_answer_brief
+_capture_review_bundle = cli_support.capture_review_bundle
+_runtime_plan_request = cli_support.runtime_plan_request
+_validation_preview = cli_support.validation_preview
+_runtime_token_command = cli_support.runtime_token_command
+_read_validated_runtime_plan = cli_support.read_validated_runtime_plan
+_skill_export_generate_path = cli_support.skill_export_generate_path
+_skill_export_download_url = cli_support.skill_export_download_url
+_skill_profile = cli_support.skill_profile
+_skill_skills_dir = cli_support.skill_skills_dir
+_add_common_resource_args = cli_support.add_common_resource_args
+_print_default = cli_support.print_default
+sh_quote = cli_support.sh_quote
+cmd_resource_add_doc = cli_resources.cmd_resource_add_doc
+cmd_resource_add_repo = cli_resources.cmd_resource_add_repo
+cmd_resource_add_url = cli_resources.cmd_resource_add_url
+cmd_resource_add_upload = cli_resources.cmd_resource_add_upload
+cmd_resource_refresh = cli_resources.cmd_resource_refresh
+cmd_resource_list = cli_resources.cmd_resource_list
+cmd_resource_get = cli_resources.cmd_resource_get
+cmd_resource_update = cli_resources.cmd_resource_update
+cmd_resource_update_git = cli_resources.cmd_resource_update_git
+cmd_resource_archive = cli_resources.cmd_resource_archive
+cmd_resource_delete = cli_resources.cmd_resource_delete
+cmd_resource_restore = cli_resources.cmd_resource_restore
+cmd_resource_purge = cli_resources.cmd_resource_purge
+cmd_resource_schedule_due = cli_resources.cmd_resource_schedule_due
+cmd_resource_graph = cli_resources.cmd_resource_graph
 
 
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, sort_keys=True))
 
 
-def _print_kv(title: str, data: dict[str, Any], keys: list[str]) -> None:
-    print(title)
-    for key in keys:
-        if key in data:
-            print(f"  {key}: {data[key]}")
 
 
-def _resource_ids(values: list[str] | None) -> list[str] | None:
-    return values or None
-
-
-def _resource_refs(args: argparse.Namespace) -> list[str] | None:
-    values = getattr(args, "resource", None) or []
-    return values or None
-
-
-def _apply_resource_refs(body: dict[str, Any], args: argparse.Namespace) -> None:
-    refs = _resource_refs(args)
-    if not refs:
-        return
-    if len(refs) == 1:
-        body["resource_ref"] = refs[0]
-    else:
-        body["resource_refs"] = refs
-
-
-def _split_csv_or_repeated(values: str | list[str] | None) -> list[str] | None:
-    if not values:
-        return None
-    raw_values = [values] if isinstance(values, str) else values
-    result: list[str] = []
-    for value in raw_values:
-        result.extend(part.strip() for part in value.split(",") if part.strip())
-    return result or None
 
 
 def _agent_pack_doctor_package_only(args: argparse.Namespace) -> bool:
@@ -152,18 +158,6 @@ def _command_uses_authenticated_api(args: argparse.Namespace) -> bool:
 def _maybe_session_login(client: SourceBriefClient, args: argparse.Namespace) -> None:
     cli_auth.maybe_session_login(client, args, command_uses_authenticated_api=_command_uses_authenticated_api)
 
-
-def _wait_for_run(client: SourceBriefClient, workspace_id: str, index_run_id: str, timeout: int) -> dict[str, Any]:
-    deadline = time.time() + timeout
-    current: dict[str, Any] = {"status": "queued", "id": index_run_id}
-    while time.time() < deadline:
-        current = client.request("GET", f"/workspaces/{workspace_id}/index-runs/{index_run_id}")
-        if current.get("status") in {"succeeded", "failed"}:
-            break
-        time.sleep(2)
-    if current.get("status") != "succeeded":
-        raise SourceBriefCliError(f"index run did not succeed before timeout: {current}")
-    return current
 
 
 def cmd_health(client: SourceBriefClient, _args: argparse.Namespace) -> Any:
@@ -249,59 +243,6 @@ def cmd_logout(_client: SourceBriefClient, args: argparse.Namespace) -> Any:
     return {"status": "logged_out", "config_path": str(path), "removed_session": had_session}
 
 
-def _check_result(name: str, status: str, **extra: Any) -> dict[str, Any]:
-    return {"name": name, "status": status, **extra}
-
-
-def _mcp_error_message(response: Any) -> str | None:
-    if not isinstance(response, dict):
-        return "MCP response was not a JSON object"
-    error = response.get("error")
-    if error:
-        return json.dumps(error, sort_keys=True) if isinstance(error, dict) else str(error)
-    result = response.get("result")
-    if isinstance(result, dict) and result.get("isError") is True:
-        content = result.get("content")
-        return "MCP tool returned isError=true" + (f": {content!r}" if content else "")
-    return None
-
-
-def _mcp_structured_payload(response: Any) -> dict[str, Any] | None:
-    if not isinstance(response, dict):
-        return None
-    result = response.get("result")
-    if not isinstance(result, dict):
-        return None
-    structured = result.get("structuredContent")
-    if isinstance(structured, dict):
-        return structured
-    content = result.get("content")
-    if isinstance(content, list):
-        for item in content:
-            if not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str):
-                continue
-            try:
-                parsed = json.loads(item["text"])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict):
-                return parsed
-    return None
-
-
-def _mcp_citation_count(response: Any) -> int:
-    payload = _mcp_structured_payload(response)
-    if not isinstance(payload, dict):
-        return 0
-    citations = payload.get("citations")
-    if isinstance(citations, list) and citations:
-        return len(citations)
-    answer = payload.get("answer")
-    if isinstance(answer, dict):
-        citations_used = answer.get("citations_used")
-        if isinstance(citations_used, list) and citations_used:
-            return len(citations_used)
-    return 0
 
 
 
@@ -443,240 +384,6 @@ def cmd_token_revoke(client: SourceBriefClient, args: argparse.Namespace) -> Any
     return client.request("DELETE", f"/workspaces/{args.workspace_id}/api-tokens/{args.token_id}")
 
 
-def _maybe_refresh(client: SourceBriefClient, args: argparse.Namespace, resource: dict[str, Any]) -> dict[str, Any]:
-    if not args.refresh:
-        return {"resource": resource}
-    run = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{resource['id']}/refresh",
-        expected={202},
-    )
-    result: dict[str, Any] = {"resource": resource, "index_run": run}
-    if args.wait:
-        result["index_run"] = _wait_for_run(client, args.workspace_id, run["id"], args.timeout)
-    return result
-
-
-def cmd_resource_add_doc(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    content = args.content
-    if args.content_file:
-        content = Path(args.content_file).read_text(encoding="utf-8")
-    if not content:
-        raise SourceBriefCliError("add-doc requires --content or --content-file")
-    resource = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources",
-        body={
-            "type": "markdown",
-            "name": args.name,
-            "uri": args.uri,
-            "update_frequency": args.update_frequency,
-            "source_config": {"content": content, "path": args.path, "title": args.title or args.name},
-        },
-        expected={201},
-    )
-    return _maybe_refresh(client, args, resource)
-
-
-def cmd_resource_add_repo(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    source_config: dict[str, Any] = {"url": args.repo_url}
-    if args.branch:
-        source_config["branch"] = args.branch
-    if args.max_files:
-        source_config["max_repo_files"] = args.max_files
-    if args.max_file_bytes:
-        source_config["max_file_bytes"] = args.max_file_bytes
-    if args.max_repo_bytes:
-        source_config["max_repo_bytes"] = args.max_repo_bytes
-    if args.clone_timeout:
-        source_config["clone_timeout"] = args.clone_timeout
-    resource = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources",
-        body={
-            "type": "git",
-            "name": args.name,
-            "uri": args.repo_url,
-            "update_frequency": args.update_frequency,
-            "source_config": source_config,
-        },
-        expected={201},
-    )
-    return _maybe_refresh(client, args, resource)
-
-
-def cmd_resource_add_url(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    source_config: dict[str, Any] = {"url": args.url}
-    if args.title:
-        source_config["title"] = args.title
-    if args.max_url_bytes:
-        source_config["max_url_bytes"] = args.max_url_bytes
-    if args.fetch_timeout:
-        source_config["fetch_timeout"] = args.fetch_timeout
-    resource = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources",
-        body={
-            "type": "url",
-            "name": args.name,
-            "uri": args.url,
-            "update_frequency": args.update_frequency,
-            "source_config": source_config,
-        },
-        expected={201},
-    )
-    return _maybe_refresh(client, args, resource)
-
-
-def cmd_resource_add_upload(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    upload_path = Path(args.path)
-    max_document_bytes = args.max_document_bytes or 5_000_000
-    if upload_path.stat().st_size > max_document_bytes:
-        raise SourceBriefCliError(f"upload file exceeds max_document_bytes={max_document_bytes}")
-    content = upload_path.read_text(encoding=args.encoding)
-    source_config: dict[str, Any] = {
-        "filename": args.filename or Path(args.path).name,
-        "content_type": args.content_type,
-        "content": content,
-        "max_document_bytes": max_document_bytes,
-    }
-    if args.title:
-        source_config["title"] = args.title
-    resource = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources",
-        body={
-            "type": "upload",
-            "name": args.name,
-            "uri": f"upload://{source_config['filename']}",
-            "update_frequency": args.update_frequency,
-            "source_config": source_config,
-        },
-        expected={201},
-    )
-    return _maybe_refresh(client, args, resource)
-
-
-def cmd_resource_refresh(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-
-    run = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}/refresh",
-        expected={202},
-    )
-    if args.wait:
-        return _wait_for_run(client, args.workspace_id, run["id"], args.timeout)
-    return run
-
-
-def cmd_resource_list(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    return client.request("GET", f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources")
-
-
-def cmd_resource_get(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    return client.request("GET", f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}")
-
-
-def cmd_resource_update(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    body: dict[str, Any] = {}
-    for field in ("name", "uri", "update_frequency", "retrieval_enabled", "stale_after_days"):
-        value = getattr(args, field, None)
-        if value is not None:
-            body[field] = value
-    if args.source_config_json:
-        try:
-            parsed = json.loads(args.source_config_json)
-        except json.JSONDecodeError as exc:
-            raise SourceBriefCliError("--source-config-json must be valid JSON") from exc
-        if not isinstance(parsed, dict):
-            raise SourceBriefCliError("--source-config-json must be a JSON object")
-        body["source_config"] = parsed
-    if not body:
-        raise SourceBriefCliError("resource update requires at least one field to change")
-    return client.request(
-        "PATCH",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}",
-        body=body,
-    )
-
-
-def cmd_resource_update_git(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    body: dict[str, Any] = {}
-    mapping = {
-        "branch": "branch",
-        "auth_token_env": "auth_token_env",
-        "clone_timeout": "clone_timeout",
-        "max_file_bytes": "max_file_bytes",
-        "max_files": "max_repo_files",
-        "max_repo_bytes": "max_repo_bytes",
-        "update_frequency": "update_frequency",
-    }
-    for arg_name, field_name in mapping.items():
-        value = getattr(args, arg_name, None)
-        if value is not None:
-            body[field_name] = value
-    if not body:
-        raise SourceBriefCliError("resource update-git requires at least one git setting to change")
-    return client.request(
-        "PATCH",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}/git-env",
-        body=body,
-    )
-
-
-def cmd_resource_archive(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    return client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}/archive",
-    )
-
-
-def cmd_resource_delete(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    client.request(
-        "DELETE",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}",
-        expected={204},
-    )
-    return {"status": "deleted", "resource_id": args.resource_id}
-
-
-def cmd_resource_restore(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    return client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}/restore",
-    )
-
-
-def cmd_resource_purge(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    return client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}/purge",
-    )
-
-
-def cmd_resource_schedule_due(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    query = f"limit={args.limit}"
-    if args.dry_run:
-        query += "&dry_run=true"
-    return client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/scheduled-refreshes?{query}",
-        expected={202},
-    )
 
 
 def cmd_search(client: SourceBriefClient, args: argparse.Namespace) -> Any:
@@ -733,97 +440,7 @@ def cmd_mcp_context(client: SourceBriefClient, args: argparse.Namespace) -> Any:
     )
 
 
-def _pick_answer_lines(context: str, *, limit: int = 3) -> list[str]:
-    lines: list[str] = []
-    for raw_line in context.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("[") or line.startswith("#"):
-            continue
-        lines.append(line)
-        if len(lines) >= limit:
-            break
-    return lines
 
-
-def _human_answer_brief(data: dict[str, Any]) -> dict[str, Any]:
-    citations = data.get("citations") or []
-    warnings = data.get("coverage_warnings") or []
-    api_answer = data.get("answer") if isinstance(data.get("answer"), dict) else None
-    if api_answer and api_answer.get("text"):
-        return {
-            "query": data.get("query"),
-            "answer": api_answer.get("text"),
-            "outcome": api_answer.get("outcome", "answered"),
-            "abstention_reason": api_answer.get("abstention_reason"),
-            "unsupported_claim_terms": api_answer.get("unsupported_claim_terms") or [],
-            "citations_used": api_answer.get("citations_used") or [],
-            "confidence": api_answer.get("confidence", "medium"),
-            "missing_evidence": api_answer.get("caveats") or warnings,
-            "suggested_follow_up_reads": [call.get("arguments", {}) for call in data.get("suggested_tool_calls", [])[:2]],
-            "raw_packet_hint": "Run with --json for the full agent-context packet.",
-        }
-    answer_lines = _pick_answer_lines(str(data.get("context") or ""))
-    if answer_lines:
-        answer = " ".join(answer_lines)
-    elif citations:
-        answer = "SourceBrief found cited context, but no readable snippet fit the response budget. Use --json to inspect the full packet."
-    else:
-        answer = "No grounded answer is available from the selected SourceBrief evidence."
-    cited = citations[:3]
-    return {
-        "query": data.get("query"),
-        "answer": answer,
-        "citations_used": [
-            {
-                "label": f"[{idx}]",
-                "path": citation.get("path") or citation.get("title") or str(citation.get("resource_id")),
-                "resource_id": citation.get("resource_id"),
-                "snapshot_id": citation.get("snapshot_id"),
-                "content_hash": citation.get("content_hash"),
-                "score": citation.get("score"),
-            }
-            for idx, citation in enumerate(cited, start=1)
-        ],
-        "confidence": "low" if warnings or not citations else "medium",
-        "missing_evidence": warnings,
-        "suggested_follow_up_reads": [call.get("arguments", {}) for call in data.get("suggested_tool_calls", [])[:2]],
-        "raw_packet_hint": "Run with --json for the full agent-context packet.",
-    }
-
-
-def _capture_review_bundle(
-    *,
-    agent_context: dict[str, Any],
-    args: argparse.Namespace,
-    query: str,
-    kind: str = "answer",
-    task_brief: str = "Capture a cited SourceBrief answer for autonomous review.",
-) -> dict[str, Any] | None:
-    output_path = getattr(args, "review_bundle_out", None)
-    if not output_path:
-        return None
-    bundle = build_review_bundle_from_agent_context(
-        agent_context=agent_context,
-        workspace_id=args.workspace_id,
-        project_id=args.project_id,
-        query=query,
-        runtime=getattr(args, "runtime", "api"),
-        top_k=getattr(args, "top_k", 8),
-        max_chars=getattr(args, "max_chars", 12000),
-        kind=kind,  # type: ignore[arg-type]
-        command=["sourcebrief", *list(getattr(args, "_sourcebrief_argv", []) or [])],
-        resource_ids=_resource_ids(getattr(args, "resource_id", None)),
-        task_brief=task_brief,
-    )
-    written = write_review_bundle(output_path, bundle)
-    return {
-        "path": str(written),
-        "bundle_id": bundle.bundle_id,
-        "schema_version": bundle.schema_version,
-        "completeness": bundle.security.completeness,
-        "citation_count": len(bundle.citations),
-        "claim_count": len(bundle.output.claim_ids),
-    }
 
 
 def cmd_ask(client: SourceBriefClient, args: argparse.Namespace) -> Any:
@@ -1096,60 +713,12 @@ def cmd_review_sleep(_client: SourceBriefClient, args: argparse.Namespace) -> An
     return summary.model_dump(mode="json")
 
 
-def _runtime_plan_request(client: SourceBriefClient, args: argparse.Namespace) -> dict[str, Any]:
-    _require_scope(args)
-    plan = client.request(
-        "POST",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/runtime-install-plan",
-        body={
-            "target": args.target,
-            "public_api_url": args.public_api_url,
-            "server_name": args.server_name,
-            "resource_ids": _resource_ids(args.resource_id),
-            "include_optional_tools": args.include_optional_tools,
-        },
-    )
-    return runtime_apply.attach_plan_metadata(plan)
-
 
 def cmd_runtime_plan(client: SourceBriefClient, args: argparse.Namespace) -> Any:
     return _runtime_plan_request(client, args)
 
 
-def _validation_preview(plan: dict[str, Any], target: str, max_age_seconds: int) -> dict[str, Any]:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
-        json.dump(plan, handle)
-        path = Path(handle.name)
-    try:
-        validation = runtime_apply.read_plan(path, target=target, max_age_seconds=max_age_seconds)
-        return runtime_apply.validate_plan(validation, run=False)
-    finally:
-        path.unlink(missing_ok=True)
 
-
-def _runtime_token_command(plan: dict[str, Any]) -> str:
-    parts = [
-        "sourcebrief",
-        "token",
-        "create-runtime",
-        "--workspace-id",
-        sh_quote(str(plan.get("workspace_id") or "<workspace-id>")),
-    ]
-    if "code:read" in (plan.get("required_scopes") or []):
-        parts.append("--read-code")
-    else:
-        parts.append("--context-only")
-    project_id = plan.get("project_id")
-    if project_id:
-        parts.extend(["--project-id", sh_quote(str(project_id))])
-    resources = (plan.get("resource_scope") or {}).get("resources") or []
-    for resource_id in resources:
-        parts.extend(["--resource-id", sh_quote(str(resource_id))])
-    return " ".join(parts)
-
-
-def sh_quote(value: str) -> str:
-    return shlex.quote(value)
 
 
 def cmd_runtime_setup(client: SourceBriefClient, args: argparse.Namespace) -> Any:
@@ -1182,13 +751,6 @@ def cmd_runtime_setup(client: SourceBriefClient, args: argparse.Namespace) -> An
     }
 
 
-def _read_validated_runtime_plan(args: argparse.Namespace) -> runtime_apply.PlanValidation:
-    return runtime_apply.read_plan(
-        Path(args.plan),
-        target=args.target,
-        max_age_seconds=args.max_age_seconds,
-    )
-
 
 def cmd_runtime_detect(_client: SourceBriefClient, args: argparse.Namespace) -> Any:
     return runtime_apply.detect(runtime_apply.hermes_config_path(args.config))
@@ -1215,18 +777,6 @@ def cmd_runtime_validate(_client: SourceBriefClient, args: argparse.Namespace) -
     return runtime_apply.validate_plan(validation, run=args.run)
 
 
-def _skill_export_generate_path(client: SourceBriefClient, args: argparse.Namespace) -> str:
-    _require_scope(args)
-    version = args.pack_version
-    if not version:
-        current = client.request("GET", f"/workspaces/{args.workspace_id}/projects/{args.project_id}/context-packs/{args.pack_key}/current")
-        version = str(current.get("version"))
-    return f"/workspaces/{args.workspace_id}/projects/{args.project_id}/context-packs/{args.pack_key}/versions/{version}/skill-exports"
-
-
-def _skill_export_download_url(client: SourceBriefClient, args: argparse.Namespace, export: dict[str, Any]) -> str:
-    export_id = export.get("id")
-    return f"{client.api_url}/workspaces/{args.workspace_id}/projects/{args.project_id}/skill-exports/{export_id}/download.zip"
 
 
 def cmd_skill_export(client: SourceBriefClient, args: argparse.Namespace) -> Any:
@@ -1256,12 +806,6 @@ def cmd_skill_export(client: SourceBriefClient, args: argparse.Namespace) -> Any
     }
 
 
-def _skill_profile(args: argparse.Namespace) -> str:
-    return args.profile or "default"
-
-
-def _skill_skills_dir(args: argparse.Namespace) -> Path:
-    return Path(args.skills_dir).expanduser() if args.skills_dir else skill_install.default_skills_dir(_skill_profile(args))
 
 
 def cmd_skill_install(_client: SourceBriefClient, args: argparse.Namespace) -> Any:
@@ -1304,25 +848,6 @@ def cmd_agent_profile(client: SourceBriefClient, args: argparse.Namespace) -> An
         f"/workspaces/{args.workspace_id}/projects/{args.project_id}/agent-profile",
     )
 
-
-def cmd_resource_graph(client: SourceBriefClient, args: argparse.Namespace) -> Any:
-    _require_scope(args)
-    return client.request(
-        "GET",
-        f"/workspaces/{args.workspace_id}/projects/{args.project_id}/resources/{args.resource_id}/graph?limit={args.limit}",
-    )
-
-
-def _add_common_resource_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--workspace", help="workspace name or slug; defaults to sourcebrief use selection")
-    parser.add_argument("--workspace-id", help="advanced: workspace ID; defaults to sourcebrief use selection")
-    parser.add_argument("--project", help="project name; defaults to sourcebrief use selection")
-    parser.add_argument("--project-id", help="advanced: project ID; defaults to sourcebrief use selection")
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--update-frequency", default="manual")
-    parser.add_argument("--refresh", action="store_true", help="refresh after creating the resource")
-    parser.add_argument("--wait", action="store_true", help="wait for refresh completion")
-    parser.add_argument("--timeout", type=int, default=120, help="seconds to wait for refresh")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1446,148 +971,7 @@ def build_parser() -> argparse.ArgumentParser:
     token_revoke.add_argument("--token-id", required=True)
     token_revoke.set_defaults(func=cmd_token_revoke)
 
-    resources = sub.add_parser("resource", help="resource commands").add_subparsers(dest="resource_command")
-    add_doc = resources.add_parser("add-doc", help="add a markdown/document resource")
-    _add_common_resource_args(add_doc)
-    add_doc.add_argument("--uri", required=True)
-    add_doc.add_argument("--content")
-    add_doc.add_argument("--content-file")
-    add_doc.add_argument("--path")
-    add_doc.add_argument("--title")
-    add_doc.set_defaults(func=cmd_resource_add_doc)
-
-    add_repo = resources.add_parser("add-repo", help="add a git repository resource")
-    _add_common_resource_args(add_repo)
-    add_repo.add_argument("--repo-url", required=True, help="public https git URL, or local file URL when the worker allows local git")
-    add_repo.add_argument("--branch")
-    add_repo.add_argument("--max-files", type=int)
-    add_repo.add_argument("--max-file-bytes", type=int)
-    add_repo.add_argument("--max-repo-bytes", type=int)
-    add_repo.add_argument("--clone-timeout", type=int)
-    add_repo.set_defaults(func=cmd_resource_add_repo)
-
-    add_url = resources.add_parser("add-url", help="add a public HTTP(S) URL resource")
-    _add_common_resource_args(add_url)
-    add_url.add_argument("--url", required=True)
-    add_url.add_argument("--title")
-    add_url.add_argument("--max-url-bytes", type=int)
-    add_url.add_argument("--fetch-timeout", type=int)
-    add_url.set_defaults(func=cmd_resource_add_url)
-
-    add_upload = resources.add_parser("add-upload", help="add an uploaded text/markdown resource from a local file")
-    _add_common_resource_args(add_upload)
-    add_upload.add_argument("--path", required=True)
-    add_upload.add_argument("--filename")
-    add_upload.add_argument("--title")
-    add_upload.add_argument("--content-type", default="text/plain")
-    add_upload.add_argument("--encoding", default="utf-8")
-    add_upload.add_argument("--max-document-bytes", type=int)
-    add_upload.set_defaults(func=cmd_resource_add_upload)
-
-    refresh = resources.add_parser("refresh", help="refresh a resource")
-    refresh.add_argument("--workspace", help="workspace name or slug")
-    refresh.add_argument("--workspace-id", help="advanced: workspace ID")
-    refresh.add_argument("--project", help="project name")
-    refresh.add_argument("--project-id", help="advanced: project ID")
-    refresh.add_argument("--resource-id", required=True)
-    refresh.add_argument("--wait", action="store_true")
-    refresh.add_argument("--timeout", type=int, default=120)
-    refresh.set_defaults(func=cmd_resource_refresh)
-
-    list_resources = resources.add_parser("list", help="list resources")
-    list_resources.add_argument("--workspace", help="workspace name or slug; defaults to sourcebrief use selection")
-    list_resources.add_argument("--workspace-id", help="advanced: workspace ID; defaults to sourcebrief use selection")
-    list_resources.add_argument("--project", help="project name; defaults to sourcebrief use selection")
-    list_resources.add_argument("--project-id", help="advanced: project ID; defaults to sourcebrief use selection")
-    list_resources.set_defaults(func=cmd_resource_list)
-
-    get_resource = resources.add_parser("get", help="show one resource")
-    get_resource.add_argument("--workspace", help="workspace name or slug; defaults to sourcebrief use selection")
-    get_resource.add_argument("--workspace-id", help="advanced: workspace ID; defaults to sourcebrief use selection")
-    get_resource.add_argument("--project", help="project name; defaults to sourcebrief use selection")
-    get_resource.add_argument("--project-id", help="advanced: project ID; defaults to sourcebrief use selection")
-    get_resource.add_argument("--resource-id", required=True)
-    get_resource.set_defaults(func=cmd_resource_get)
-
-    update_resource = resources.add_parser("update", help="update resource metadata or retrieval settings")
-    update_resource.add_argument("--workspace", help="workspace name or slug; defaults to sourcebrief use selection")
-    update_resource.add_argument("--workspace-id", help="advanced: workspace ID; defaults to sourcebrief use selection")
-    update_resource.add_argument("--project", help="project name; defaults to sourcebrief use selection")
-    update_resource.add_argument("--project-id", help="advanced: project ID; defaults to sourcebrief use selection")
-    update_resource.add_argument("--resource-id", required=True)
-    update_resource.add_argument("--name")
-    update_resource.add_argument("--uri")
-    update_resource.add_argument("--update-frequency")
-    update_resource.add_argument("--retrieval-enabled", dest="retrieval_enabled", action="store_true", default=None)
-    update_resource.add_argument("--no-retrieval-enabled", dest="retrieval_enabled", action="store_false")
-    update_resource.add_argument("--stale-after-days", type=int)
-    update_resource.add_argument("--source-config-json", help="advanced: replace source_config with this JSON object")
-    update_resource.set_defaults(func=cmd_resource_update)
-
-    update_git = resources.add_parser("update-git", help="update common git resource import settings")
-    update_git.add_argument("--workspace", help="workspace name or slug; defaults to sourcebrief use selection")
-    update_git.add_argument("--workspace-id", help="advanced: workspace ID; defaults to sourcebrief use selection")
-    update_git.add_argument("--project", help="project name; defaults to sourcebrief use selection")
-    update_git.add_argument("--project-id", help="advanced: project ID; defaults to sourcebrief use selection")
-    update_git.add_argument("--resource-id", required=True)
-    update_git.add_argument("--branch")
-    update_git.add_argument("--auth-token-env")
-    update_git.add_argument("--clone-timeout", type=int)
-    update_git.add_argument("--max-files", type=int)
-    update_git.add_argument("--max-file-bytes", type=int)
-    update_git.add_argument("--max-repo-bytes", type=int)
-    update_git.add_argument("--update-frequency")
-    update_git.set_defaults(func=cmd_resource_update_git)
-
-    archive = resources.add_parser("archive", help="archive a resource and disable retrieval")
-    archive.add_argument("--workspace", help="workspace name or slug")
-    archive.add_argument("--workspace-id", help="advanced: workspace ID")
-    archive.add_argument("--project", help="project name")
-    archive.add_argument("--project-id", help="advanced: project ID")
-    archive.add_argument("--resource-id", required=True)
-    archive.set_defaults(func=cmd_resource_archive)
-
-    delete_resource = resources.add_parser("delete", help="soft-delete a resource and disable retrieval")
-    delete_resource.add_argument("--workspace", help="workspace name or slug")
-    delete_resource.add_argument("--workspace-id", help="advanced: workspace ID")
-    delete_resource.add_argument("--project", help="project name")
-    delete_resource.add_argument("--project-id", help="advanced: project ID")
-    delete_resource.add_argument("--resource-id", required=True)
-    delete_resource.set_defaults(func=cmd_resource_delete)
-
-    restore = resources.add_parser("restore", help="restore an archived or soft-deleted resource")
-    restore.add_argument("--workspace", help="workspace name or slug")
-    restore.add_argument("--workspace-id", help="advanced: workspace ID")
-    restore.add_argument("--project", help="project name")
-    restore.add_argument("--project-id", help="advanced: project ID")
-    restore.add_argument("--resource-id", required=True)
-    restore.set_defaults(func=cmd_resource_restore)
-
-    purge = resources.add_parser("purge", help="hard purge a soft-deleted resource and artifacts")
-    purge.add_argument("--workspace", help="workspace name or slug")
-    purge.add_argument("--workspace-id", help="advanced: workspace ID")
-    purge.add_argument("--project", help="project name")
-    purge.add_argument("--project-id", help="advanced: project ID")
-    purge.add_argument("--resource-id", required=True)
-    purge.set_defaults(func=cmd_resource_purge)
-
-    schedule = resources.add_parser("schedule-due", help="enqueue due scheduled refreshes for a project")
-    schedule.add_argument("--workspace", help="workspace name or slug")
-    schedule.add_argument("--workspace-id", help="advanced: workspace ID")
-    schedule.add_argument("--project", help="project name")
-    schedule.add_argument("--project-id", help="advanced: project ID")
-    schedule.add_argument("--limit", type=int, default=100)
-    schedule.add_argument("--dry-run", action="store_true")
-    schedule.set_defaults(func=cmd_resource_schedule_due)
-
-    graph = resources.add_parser("graph", help="show a resource graph index")
-    graph.add_argument("--workspace", help="workspace name or slug")
-    graph.add_argument("--workspace-id", help="advanced: workspace ID")
-    graph.add_argument("--project", help="project name")
-    graph.add_argument("--project-id", help="advanced: project ID")
-    graph.add_argument("--resource-id", required=True)
-    graph.add_argument("--limit", type=int, default=50)
-    graph.set_defaults(func=cmd_resource_graph)
+    cli_resources.register_resource_commands(sub)
 
     agent_pack_doctor.register_agent_pack_commands(sub, doctor_command=cmd_agent_pack_doctor)
 
@@ -1734,82 +1118,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
-
-def _print_default(command: str | None, data: Any) -> None:
-    if isinstance(data, dict):
-        if "resource" in data and isinstance(data["resource"], dict):
-            _print_kv("Resource", data["resource"], ["id", "name", "type", "uri", "status"])
-            if "index_run" in data:
-                _print_kv("Index run", data["index_run"], ["id", "status", "documents_seen", "chunks_created", "symbols_created", "embeddings_created"])
-            return
-        if command in {"workspace", "project", "health"}:
-            _print_kv(command.title() if command else "Result", data, ["id", "name", "slug", "workspace_id", "status"])
-            return
-        if command == "search":
-            print(f"Search: {data.get('query')} ({data.get('count', 0)} hits)")
-            for hit in data.get("hits", []):
-                print(f"- {hit.get('path') or hit.get('title') or hit.get('resource_id')}: {hit.get('snippet')}")
-            return
-        if command == "runtime" and data.get("status") == "dry_run_ready":
-            print("Runtime setup: dry-run ready")
-            print(f"  target: {data.get('target')}")
-            print(f"  workspace_id: {data.get('workspace_id')}")
-            print(f"  project_id: {data.get('project_id')}")
-            print(f"  server_name: {data.get('server_name')}")
-            print(f"  plan_path: {data.get('plan_path') or '(not saved; rerun with --plan-out plan.json)'}")
-            print(f"  validation: {(data.get('validation') or {}).get('status')}")
-            print(f"  token_command: {data.get('token_command')}")
-            print("Next steps:")
-            for step in data.get("next_steps", []):
-                print(f"- {step}")
-            return
-        if command == "ask" and "answer" in data:
-            print(f"Question: {data.get('query')}")
-            print(f"Answer: {data.get('answer')}")
-            if data.get("outcome"):
-                print(f"Outcome: {data.get('outcome')}")
-            if data.get("abstention_reason"):
-                print(f"Abstention reason: {data.get('abstention_reason')}")
-            if data.get("unsupported_claim_terms"):
-                print("Unsupported claim terms: " + ", ".join(str(term) for term in data.get("unsupported_claim_terms", [])))
-            print(f"Confidence: {data.get('confidence')}")
-            citations = data.get("citations_used") or []
-            if citations:
-                print("Citations:")
-                for citation in citations:
-                    print(f"- {citation.get('label')} {citation.get('path')} score={citation.get('score')}")
-            if data.get("missing_evidence"):
-                print("Missing evidence / warnings:")
-                for warning in data.get("missing_evidence", []):
-                    print(f"- {warning}")
-            if data.get("review_bundle"):
-                print(f"Review bundle: {(data.get('review_bundle') or {}).get('path')}")
-            print(data.get("raw_packet_hint"))
-            return
-        if command == "quickstart-demo" and data.get("status") == "indexed_and_ready_for_retrieval":
-            print("Quickstart demo: indexed and ready for retrieval")
-            print(f"  workspace: {data.get('workspace_name')}")
-            print(f"  project: {data.get('project_name')}")
-            print(f"  resource: {data.get('resource_name')}")
-            print(f"  saved_defaults: {data.get('config_path')}")
-            print(f"  index_status: {(data.get('index_run') or {}).get('status')}")
-            if data.get("mcp_validation"):
-                print(f"  mcp_validation: {(data.get('mcp_validation') or {}).get('status')}")
-            answer = data.get("answer") or {}
-            print(f"Answer: {answer.get('answer')}")
-            if data.get("review_bundle"):
-                print(f"  review_bundle: {(data.get('review_bundle') or {}).get('path')}")
-            print("Citations:")
-            for citation in answer.get("citations_used", []):
-                print(f"- {citation.get('label')} {citation.get('path')} score={citation.get('score')}")
-            print("Next:")
-            print(f"- {data.get('next_command')}")
-            print(f"- {data.get('cleanup')}")
-            return
-        if command in {"agent-context", "mcp-context", "ask", "agent", "agent-pack", "token", "runtime", "skill", "use", "status", "doctor", "login", "logout"}:
-            _print_json(data)
-            return
-    _print_json(data)
 
 
 def main(argv: list[str] | None = None) -> int:
