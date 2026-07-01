@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sourcebrief_api.main import app
 
-EXPECTED_ROUTE_SIGNATURES = {
+EXPECTED_RUNTIME_AGENT_ROUTE_SIGNATURES = {
     ("GET", "/healthz", "healthz"),
     ("GET", "/provider-health", "provider_health"),
     ("GET", "/workspaces/{workspace_id}/projects/{project_id}/agent-files", "get_agent_files"),
@@ -17,6 +17,19 @@ EXPECTED_ROUTE_SIGNATURES = {
     ("GET", "/workspaces/{workspace_id}/projects/{project_id}/git-env", "list_git_env"),
     ("PATCH", "/workspaces/{workspace_id}/projects/{project_id}/resources/{resource_id}/git-env", "update_git_env"),
 }
+
+EXPECTED_SKILL_EXPORT_ROUTE_SIGNATURES = {
+    ("POST", "/workspaces/{workspace_id}/projects/{project_id}/context-packs/{pack_key}/versions/{version_number}/skill-exports", "generate_skill_export"),
+    ("GET", "/workspaces/{workspace_id}/projects/{project_id}/context-packs/{pack_key}/versions/{version_number}/skill-exports", "list_skill_exports"),
+    ("GET", "/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}", "get_skill_export"),
+    ("POST", "/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}/approve", "approve_skill_export"),
+    ("POST", "/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}/reject", "reject_skill_export"),
+    ("POST", "/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}/invalidate", "invalidate_skill_export"),
+    ("GET", "/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}/files/{file_path:path}", "download_skill_export_file"),
+    ("GET", "/workspaces/{workspace_id}/projects/{project_id}/skill-exports/{export_id}/download.zip", "download_skill_export_package"),
+}
+
+EXPECTED_ROUTE_SIGNATURES = EXPECTED_RUNTIME_AGENT_ROUTE_SIGNATURES | EXPECTED_SKILL_EXPORT_ROUTE_SIGNATURES
 
 
 def _route_signatures() -> set[tuple[str, str, str]]:
@@ -57,8 +70,17 @@ def test_recursive_route_signature_count_is_stable() -> None:
 
 def test_runtime_agent_openapi_metadata_remains_untagged() -> None:
     openapi = app.openapi()
-    for method, path, _name in EXPECTED_ROUTE_SIGNATURES:
+    for method, path, _name in EXPECTED_RUNTIME_AGENT_ROUTE_SIGNATURES:
         if path in {"/healthz", "/provider-health"}:
             continue
-        operation = openapi["paths"][path][method.lower()]
+        openapi_path = path.replace("{file_path:path}", "{file_path}")
+        operation = openapi["paths"][openapi_path][method.lower()]
+        assert "tags" not in operation
+
+
+def test_skill_export_openapi_metadata_remains_untagged() -> None:
+    openapi = app.openapi()
+    for method, path, _name in EXPECTED_SKILL_EXPORT_ROUTE_SIGNATURES:
+        openapi_path = path.replace("{file_path:path}", "{file_path}")
+        operation = openapi["paths"][openapi_path][method.lower()]
         assert "tags" not in operation
