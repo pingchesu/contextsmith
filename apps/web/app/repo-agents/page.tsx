@@ -14,8 +14,29 @@ function warnings(version: RepoAgentVersion | null) {
   return version?.validation_json?.warnings ?? [];
 }
 
+const RUNTIME_STEPS = [
+  ['Review graph', 'Index a Git source and approve Resource Map / Context Pack evidence.'],
+  ['Publish Agent', 'Refresh a Repo Agent draft, review validation, then publish with a comment.'],
+  ['Install Agent Pack', 'When an approved package exists, copy/install only the thin adapter; do not sync the corpus.'],
+  ['Validate Runtime', 'Run agent-pack doctor with a cited smoke query before trusting runtime answers.'],
+];
+
+function quoteShellArg(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function workspaceProjectHint(workspaceName: string | null | undefined, projectName: string | null | undefined) {
+  const workspaceFlag = workspaceName ? `--workspace ${quoteShellArg(workspaceName)}` : "--workspace '<workspace>'";
+  const projectFlag = projectName ? `--project ${quoteShellArg(projectName)}` : "--project '<project>'";
+  return `${workspaceFlag} ${projectFlag}`;
+}
+
+function hasApprovedAgentPack(version: RepoAgentVersion | null | undefined) {
+  return Boolean(version?.skill_export_id);
+}
+
 export default function RepoAgentsPage() {
-  const { settings, client, resources, signedIn, loading, reload } = usePlatform();
+  const { settings, client, resources, workspace, project, signedIn, loading, reload } = usePlatform();
   const [agents, setAgents] = useState<RepoAgent[]>([]);
   const [selectedKey, setSelectedKey] = useState('');
   const [resourceId, setResourceId] = useState('');
@@ -32,6 +53,8 @@ export default function RepoAgentsPage() {
   const newestDraft = drafts[0] ?? null;
   const failed = selected?.versions.filter((version) => version.status === 'failed') ?? [];
   const activeCurrentVersion = selected?.status !== 'archived' ? selected?.current_version_id : null;
+  const selectedCurrentHasPackage = hasApprovedAgentPack(selected?.current);
+  const doctorCommand = `sourcebrief agent-pack doctor --package ./sourcebrief-skill\nsourcebrief agent-pack doctor --package ./sourcebrief-skill ${workspaceProjectHint(workspace?.name, project?.name)} --query "What does this repo agent cover?"`;
 
   async function loadAgents() {
     if (!settings.workspaceId || !settings.projectId || !settings.sessionToken) return;
@@ -91,9 +114,10 @@ export default function RepoAgentsPage() {
     </div>;
   }
 
-  return <main className="page"><PageHeader eyebrow="Repo Agents" title="Repository runtime profiles" description="Managed, read-only repo-agent views over Git sources. Refresh creates drafts; publish is always manual and review-gated." actions={<button className="btn secondary" disabled={busy || loading} onClick={() => void loadAgents()}>{busy ? 'Working…' : 'Reload agents'}</button>} />
+  return <main className="page"><PageHeader eyebrow="Repo Agents" title="Publish Agents & Agent Packs" description="Primary runtime entry point: publish a reviewed Repo/Project Agent, then install and validate an approved Agent Pack when a local package is available." actions={<button className="btn secondary" disabled={busy || loading} onClick={() => void loadAgents()}>{busy ? 'Working…' : 'Reload agents'}</button>} />
     {error ? <div className="notice error">{error}</div> : null}
-    <div className="grid three"><Metric label="Repo Agents" value={agents.length} /><Metric label="Pending drafts" value={agents.reduce((sum, agent) => sum + agent.versions.filter((version) => version.status === 'draft').length, 0)} /><Metric label="Pack-only capable" value={agents.filter((agent) => agent.current && !agent.current.skill_export_id).length} /></div>
+    <div className="grid three"><Metric label="Repo Agents" value={agents.length} /><Metric label="Pending drafts" value={agents.reduce((sum, agent) => sum + agent.versions.filter((version) => version.status === 'draft').length, 0)} /><Metric label="Approved packages" value={agents.filter((agent) => hasApprovedAgentPack(agent.current)).length} /></div>
+    <Card><h2>Runtime path</h2><p className="muted">Use this page as the one-level entry point for the Agent Pack workflow. Skill Export remains an adapter format, not the primary user destination.</p><div className="grid four" style={{ marginTop: 12 }}>{RUNTIME_STEPS.map(([title, text], index) => <div key={title} className="notice"><div className="label">Step {index + 1}</div><strong>{title}</strong><div className="muted">{text}</div></div>)}</div></Card>
     <div className="grid two">
       <Card><h2>Create Repo Agent</h2>{!signedIn ? <EmptyState text="Sign in to create Repo Agents." /> : gitResources.length === 0 ? <EmptyState text="Connect and index a Git source first. Repo Agent V0 is scoped to Git resources." /> : <form className="grid" onSubmit={createAgent}>
         <Field label="Git source"><select className="input" value={resourceId} onChange={(event) => setResourceId(event.target.value)} required><option value="">Choose Git source</option>{gitResources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></Field>
@@ -102,13 +126,13 @@ export default function RepoAgentsPage() {
         <Field label="Title (optional)"><input className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Source Repo Agent" /></Field>
         <button className="btn" disabled={busy}>{busy ? 'Creating…' : 'Create Repo Agent'}</button>
       </form>}</Card>
-      <Card><h2>Operating boundary</h2><ul className="muted"><li>Refresh compiles from the latest indexed Git snapshot; it does not clone by itself.</li><li>Publish, rollback, archive, invalidate, and scrub require review-gated comments.</li><li>Repo Agent V0 is read-only context. No production mutation permission is included.</li></ul></Card>
+      <Card><h2>Operating boundary</h2><ul className="muted"><li>Repo Agent is the product surface; Skill Export is one Agent Pack packaging format.</li><li>Refresh compiles from the latest indexed Git snapshot; it does not clone or sync the corpus locally.</li><li>Publish, rollback, archive, invalidate, and scrub require review-gated comments.</li><li>Repo Agent V0 is read-only context. No production mutation permission is included.</li></ul></Card>
     </div>
     <div className="grid two">
       <Card><h2>Agents</h2>{agents.length === 0 ? <EmptyState text="No Repo Agents yet. Create one from a Git source." /> : <div className="table-wrap"><table><thead><tr><th>Agent</th><th>Pack</th><th>Current</th><th>Drafts</th><th>Action</th></tr></thead><tbody>{agents.map((agent) => <tr key={agent.id} className="clickable" onClick={() => setSelectedKey(agent.agent_key)}><td><strong>{agent.title}</strong><div className="muted">{agent.agent_key} · <StatusChip value={agent.status} /></div></td><td>{agent.pack_key}</td><td>{agent.current ? <span>v{agent.current.version} · <StatusChip value={agent.current.status} /></span> : <span className="muted">none</span>}</td><td>{agent.versions.filter((version) => version.status === 'draft').length}</td><td><button className="btn secondary" disabled={busy || agent.status === 'archived'} onClick={(event) => { event.stopPropagation(); void refreshAgent(agent); }}>Refresh draft</button></td></tr>)}</tbody></table></div>}</Card>
       <Card><h2>Selected Repo Agent</h2>{!selected ? <EmptyState text="Select or create a Repo Agent." /> : <div className="grid">
         <div className="section-card-head"><div><strong>{selected.title}</strong><div className="muted">{selected.agent_key} · pack {selected.pack_key}</div></div><StatusChip value={selected.status} /></div>
-        {selected.current ? <div className="notice"><strong>Current published version v{selected.current.version}</strong><div className="muted">{short(selected.current.version_hash)} · published {fmt(selected.current.published_at)}</div><pre className="code-block">{jsonText(selected.current.install_json)}</pre></div> : <div className="empty">No current published runtime version. Refresh and publish a valid draft.</div>}
+        {selected.current ? <div className="notice"><strong>Current published version v{selected.current.version}</strong><div className="muted">{short(selected.current.version_hash)} · published {fmt(selected.current.published_at)}</div><div className="grid" style={{ marginTop: 8 }}>{selectedCurrentHasPackage ? <><div><h3>Install Agent Pack</h3><div className="muted">Install or copy the approved thin adapter only. It points runtimes back to SourceBrief for current cited evidence.</div></div><pre className="code-block">{doctorCommand}</pre></> : <div className="notice"><h3>Published agent, package not approved yet</h3><div className="muted">This version has remote-live Repo Agent metadata, but no approved Skill Export / Agent Pack package. Generate and approve the Agent Pack format before running local package doctor.</div></div>}<div><h3>Publish metadata</h3><pre className="code-block">{jsonText(selected.current.install_json)}</pre></div></div></div> : <div className="empty">No current published runtime version. Refresh and publish a valid draft.</div>}
         <Field label="Review comment / reason"><input className="input" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required for publish / rollback / archive / invalidate / scrub" /></Field>
         {newestDraft ? <div className="notice"><strong>Newest draft v{newestDraft.version}</strong><div className="muted">{short(newestDraft.version_hash)} · {fmt(newestDraft.created_at)}</div>{warnings(newestDraft).length ? <div className="notice">Warnings: <pre className="code-block">{jsonText(warnings(newestDraft))}</pre></div> : null}<div className="grid two"><div><h3>Draft summary</h3><pre className="code-block">{jsonText(newestDraft.summary_json)}</pre></div><div><h3>Draft diff</h3><pre className="code-block">{jsonText(newestDraft.diff_json)}</pre></div></div><h3>Install preview</h3><pre className="code-block">{jsonText(newestDraft.install_json)}</pre>{newestDraft.validation_json?.ok === false ? <pre className="code-block">{jsonText(newestDraft.validation_json)}</pre> : null}<button className="btn" disabled={busy || newestDraft.validation_json?.ok === false || selected.status === 'archived'} onClick={() => void action(`/workspaces/${settings.workspaceId}/projects/${settings.projectId}/repo-agents/${selected.agent_key}/versions/${newestDraft.version}/publish`)}>Publish newest draft</button></div> : null}
         {failed.length ? <div className="notice error"><strong>Failed drafts</strong><pre className="code-block">{jsonText(failed[0].validation_json)}</pre></div> : null}
