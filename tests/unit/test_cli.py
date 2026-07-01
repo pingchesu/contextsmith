@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import stat
 import time
 from datetime import UTC, datetime
@@ -2677,3 +2678,199 @@ def test_agent_pack_doctor_redacts_secret_like_values_from_all_check_fields(caps
     assert manifest_schema["agent_pack_schema_version"] == "[redacted-secret-like-value]"
     assert runtime_access["mode"] == "[redacted-secret-like-value]"
     assert local_payload["contains_graph_index"] == "[redacted-secret-like-value]"
+
+
+def _pinned_snapshot_manifest_overrides() -> dict[str, Any]:
+    return {
+        "mode": "pinned-snapshot",
+        "requires_sourcebrief_remote": True,
+        "runtime_access": {
+            "mode": "pinned-snapshot",
+            "requires_sourcebrief_remote": True,
+            "local_repo_required": False,
+            "local_grep_allowed": False,
+            "local_edits_allowed": False,
+            "current_claims_require_remote": True,
+        },
+        "local_payload": {
+            "contains_full_resource": False,
+            "contains_raw_source": False,
+            "contains_embeddings": False,
+            "contains_graph_index": False,
+            "contains_resource_map_summary": True,
+            "contains_cited_excerpts": "bounded",
+        },
+        "freshness_policy": {
+            "require_remote_for_current_claims": True,
+            "pinned_snapshot": True,
+            "offline_current_claims_allowed": False,
+            "max_snapshot_age_days": 7,
+        },
+        "cache_policy": {
+            "mode": "pinned-snapshot",
+            "pinned_snapshot": True,
+            "local_mirror": False,
+            "full_resource_sync_default": False,
+            "max_snapshot_age_days": 7,
+        },
+    }
+
+
+def test_agent_pack_doctor_accepts_explicit_bounded_pinned_snapshot_policy(capsys, tmp_path):
+    package = _agent_pack_package(tmp_path, manifest_overrides=_pinned_snapshot_manifest_overrides())
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "passed"
+    assert data["package"]["mode"] == "pinned-snapshot"
+    assert next(check for check in data["checks"] if check["name"] == "runtime_access")["status"] == "passed"
+    assert next(check for check in data["checks"] if check["name"] == "local_payload")["contains_cited_excerpts"] == "bounded"
+    assert next(check for check in data["checks"] if check["name"] == "freshness_policy")["offline_current_claims_allowed"] is False
+    assert next(check for check in data["checks"] if check["name"] == "cache_policy")["pinned_snapshot"] is True
+
+
+def test_agent_pack_doctor_rejects_pinned_snapshot_current_claims_without_remote(capsys, tmp_path):
+    overrides = _pinned_snapshot_manifest_overrides()
+    overrides["freshness_policy"] = {
+        "require_remote_for_current_claims": False,
+        "pinned_snapshot": True,
+        "offline_current_claims_allowed": True,
+        "max_snapshot_age_days": 7,
+    }
+    package = _agent_pack_package(tmp_path, manifest_overrides=overrides)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "freshness_policy")["status"] == "failed"
+
+
+def test_agent_pack_doctor_rejects_pinned_snapshot_full_resource_sync(capsys, tmp_path):
+    overrides = _pinned_snapshot_manifest_overrides()
+    overrides["local_payload"] = {
+        "contains_full_resource": True,
+        "contains_raw_source": False,
+        "contains_embeddings": False,
+        "contains_graph_index": False,
+        "contains_resource_map_summary": True,
+        "contains_cited_excerpts": "bounded",
+    }
+    package = _agent_pack_package(tmp_path, manifest_overrides=overrides)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "local_payload")["status"] == "failed"
+
+
+def test_agent_pack_doctor_rejects_pinned_snapshot_unsafe_nested_runtime_access(capsys, tmp_path):
+    overrides = _pinned_snapshot_manifest_overrides()
+    overrides["runtime_access"] = {
+        "mode": "local-mirror",
+        "requires_sourcebrief_remote": False,
+        "local_repo_required": True,
+        "local_grep_allowed": True,
+        "local_edits_allowed": True,
+        "current_claims_require_remote": False,
+    }
+    package = _agent_pack_package(tmp_path, manifest_overrides=overrides)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    runtime_access = next(check for check in data["checks"] if check["name"] == "runtime_access")
+    assert runtime_access["status"] == "failed"
+    assert runtime_access["runtime_access_current_claims_require_remote"] is False
+
+
+def test_agent_pack_doctor_rejects_pinned_snapshot_schema_mismatch(capsys, tmp_path):
+    overrides = _pinned_snapshot_manifest_overrides()
+    overrides["agent_pack_schema_version"] = None
+    package = _agent_pack_package(tmp_path, manifest_overrides=overrides)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "manifest_schema")["status"] == "failed"
+
+
+def test_agent_pack_doctor_rejects_pinned_snapshot_boolean_snapshot_age(capsys, tmp_path):
+    overrides = _pinned_snapshot_manifest_overrides()
+    overrides["freshness_policy"] = {
+        "require_remote_for_current_claims": True,
+        "pinned_snapshot": True,
+        "offline_current_claims_allowed": False,
+        "max_snapshot_age_days": True,
+    }
+    overrides["cache_policy"] = {
+        "mode": "pinned-snapshot",
+        "pinned_snapshot": True,
+        "local_mirror": False,
+        "full_resource_sync_default": False,
+        "max_snapshot_age_days": True,
+    }
+    package = _agent_pack_package(tmp_path, manifest_overrides=overrides)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "freshness_policy")["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "cache_policy")["status"] == "failed"
+
+
+def test_agent_pack_doctor_rejects_pinned_snapshot_loose_snapshot_age(capsys, tmp_path):
+    overrides = _pinned_snapshot_manifest_overrides()
+    overrides["freshness_policy"] = {
+        "require_remote_for_current_claims": True,
+        "pinned_snapshot": True,
+        "offline_current_claims_allowed": False,
+        "max_snapshot_age_days": 365,
+    }
+    overrides["cache_policy"] = {
+        "mode": "pinned-snapshot",
+        "pinned_snapshot": True,
+        "local_mirror": False,
+        "full_resource_sync_default": False,
+        "max_snapshot_age_days": 365,
+    }
+    package = _agent_pack_package(tmp_path, manifest_overrides=overrides)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "freshness_policy")["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "cache_policy")["status"] == "failed"
+
+
+def _agent_pack_docs_json_blocks() -> list[dict[str, Any]]:
+    docs = (Path(__file__).resolve().parents[2] / "docs" / "AGENT_PACKS.md").read_text(encoding="utf-8")
+    return [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", docs, re.S)]
+
+
+def test_agent_pack_docs_representative_remote_live_manifest_passes_doctor(capsys, tmp_path):
+    manifest = _agent_pack_docs_json_blocks()[0]
+    package = _agent_pack_package(tmp_path, manifest_overrides=manifest)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "passed"
+    assert data["package"]["mode"] == "remote-live"
+
+
+def test_agent_pack_docs_pinned_snapshot_manifest_passes_doctor(capsys, tmp_path):
+    manifest = _agent_pack_docs_json_blocks()[1]
+    package = _agent_pack_package(tmp_path, manifest_overrides=manifest)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "passed"
+    assert data["package"]["mode"] == "pinned-snapshot"

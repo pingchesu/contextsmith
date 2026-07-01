@@ -81,6 +81,8 @@ Explicit bounded offline/reproducible mode. The pack may include selected cited 
 
 Use for demos, reproducible reviews, CI fixtures, or limited offline first-use. Pinned evidence must carry freshness warnings and must not make current claims without remote verification.
 
+`agent-pack doctor` recognizes this as an explicit non-default manifest profile. A pinned-snapshot package is valid only when it still declares SourceBrief remote as required for current claims, keeps full-resource/raw-source/embedding/graph-index payloads out of the local package, marks cited excerpts as `bounded`, sets a positive snapshot-age limit, and keeps `local_mirror` disabled.
+
 ### `local-mirror`
 
 Exceptional explicit opt-in. A local mirror may include full source/resource/index material only for air-gapped, local-only, CI-deterministic, or approved cache deployments.
@@ -93,8 +95,17 @@ Generated packs should declare their data and runtime policy explicitly. A repre
 
 ```json
 {
-  "schema_version": "sourcebrief.agent-pack.v1",
+  "agent_pack_schema_version": "sourcebrief.agent-pack.v1",
   "mode": "remote-live",
+  "requires_sourcebrief_remote": true,
+  "runtime_access": {
+    "mode": "remote-live",
+    "requires_sourcebrief_remote": true,
+    "local_repo_required": false,
+    "local_grep_allowed": false,
+    "local_edits_allowed": false,
+    "current_claims_require_remote": true
+  },
   "context_pack": {
     "key": "default",
     "version": 1,
@@ -105,15 +116,17 @@ Generated packs should declare their data and runtime policy explicitly. A repre
     "version": 1
   },
   "runtime_tools": {
-    "mcp": [
-      "ask",
-      "lookup",
-      "read_section",
-      "read_file",
-      "grep_code",
-      "find_symbol",
-      "graph_query",
-      "graph_path"
+    "mcp_required": [
+      "sourcebrief.get_agent_context"
+    ],
+    "mcp_optional": [
+      "sourcebrief.lookup",
+      "sourcebrief.read_section",
+      "sourcebrief.read_file",
+      "sourcebrief.grep_code",
+      "sourcebrief.find_symbol",
+      "sourcebrief.graph_query",
+      "sourcebrief.graph_path"
     ],
     "cli": [
       "sourcebrief ask",
@@ -136,12 +149,58 @@ Generated packs should declare their data and runtime policy explicitly. A repre
   "security_policy": {
     "requires_runtime_auth": true,
     "supports_revocation": true,
+    "plaintext_tokens_allowed": false,
+    "server_side_local_apply_allowed": false,
     "cache_mode": "none"
+  },
+  "cache_policy": {
+    "mode": "none",
+    "pinned_snapshot": false,
+    "local_mirror": false,
+    "full_resource_sync_default": false
   }
 }
 ```
 
 The exact schema can evolve, but the generated pack must be honest about whether it contains data, whether it requires SourceBrief remote access, and what freshness/cache/security policy applies.
+
+For explicit `pinned-snapshot` packages, the mode-specific fields must look like this class of policy (values may be stricter, but not looser):
+
+```json
+{
+  "mode": "pinned-snapshot",
+  "requires_sourcebrief_remote": true,
+  "runtime_access": {
+    "mode": "pinned-snapshot",
+    "requires_sourcebrief_remote": true,
+    "local_repo_required": false,
+    "local_grep_allowed": false,
+    "local_edits_allowed": false,
+    "current_claims_require_remote": true
+  },
+  "local_payload": {
+    "contains_full_resource": false,
+    "contains_raw_source": false,
+    "contains_embeddings": false,
+    "contains_graph_index": false,
+    "contains_resource_map_summary": true,
+    "contains_cited_excerpts": "bounded"
+  },
+  "freshness_policy": {
+    "require_remote_for_current_claims": true,
+    "pinned_snapshot": true,
+    "offline_current_claims_allowed": false,
+    "max_snapshot_age_days": 7
+  },
+  "cache_policy": {
+    "mode": "pinned-snapshot",
+    "pinned_snapshot": true,
+    "local_mirror": false,
+    "full_resource_sync_default": false,
+    "max_snapshot_age_days": 7
+  }
+}
+```
 
 ## Runtime flow
 
