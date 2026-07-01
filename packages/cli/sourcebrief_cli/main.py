@@ -4,6 +4,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -365,6 +366,8 @@ def _command_uses_authenticated_api(args: argparse.Namespace) -> bool:
         return False
     if args.command == "runtime" and getattr(args, "runtime_command", None) in {"detect", "apply", "rollback", "validate"}:
         return False
+    if args.command == "agent-pack" and getattr(args, "agent_pack_command", None) == "doctor" and not getattr(args, "query", None):
+        return False
     return True
 
 
@@ -383,6 +386,8 @@ def _maybe_session_login(client: SourceBriefClient, args: argparse.Namespace) ->
 
 def _command_uses_selected_scope(args: argparse.Namespace) -> bool:
     if args.command in {"ask", "search", "agent-context", "mcp-context", "doctor"}:
+        return True
+    if args.command == "agent-pack" and getattr(args, "agent_pack_command", None) == "doctor":
         return True
     if args.command == "project" and getattr(args, "project_command", None) == "create":
         return True
@@ -580,6 +585,57 @@ def _mcp_error_message(response: Any) -> str | None:
     return None
 
 
+def _mcp_structured_payload(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict):
+        return None
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return None
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        return structured
+    content = result.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str):
+                continue
+            try:
+                parsed = json.loads(item["text"])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def _mcp_citation_count(response: Any) -> int:
+    payload = _mcp_structured_payload(response)
+    if not isinstance(payload, dict):
+        return 0
+    citations = payload.get("citations")
+    if isinstance(citations, list) and citations:
+        return len(citations)
+    answer = payload.get("answer")
+    if isinstance(answer, dict):
+        citations_used = answer.get("citations_used")
+        if isinstance(citations_used, list) and citations_used:
+            return len(citations_used)
+    return 0
+
+
+SECRET_LIKE_RE = re.compile(r"(?i)(?:\bcs_[a-z0-9_\-]{8,}\b|\b(?:sourcebrief|contextsmith)[-_]?(?:token|key|secret)[-_]?[a-z0-9_\-]{4,}\b|\bsk-[a-z0-9_\-]{8,}\b)")
+
+
+def _redact_manifest_value(value: Any) -> Any:
+    if isinstance(value, str) and SECRET_LIKE_RE.search(value):
+        return "[redacted-secret-like-value]"
+    if isinstance(value, list):
+        return [_redact_manifest_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _redact_manifest_value(item) for key, item in value.items()}
+    return value
+
+
 def cmd_doctor(client: SourceBriefClient, args: argparse.Namespace) -> Any:
     checks: list[dict[str, Any]] = []
     try:
@@ -613,6 +669,12 @@ def cmd_doctor(client: SourceBriefClient, args: argparse.Namespace) -> Any:
                 error = _mcp_error_message(mcp)
                 if error:
                     checks.append(_check_result("mcp_context", "failed", query=args.query, error=error))
+                elif getattr(args, "require_citations", False):
+                    citation_count = _mcp_citation_count(mcp)
+                    if citation_count <= 0:
+                        checks.append(_check_result("mcp_context", "failed", query=args.query, error="MCP smoke returned no citations", citation_count=citation_count))
+                    else:
+                        checks.append(_check_result("mcp_context", "passed", query=args.query, has_result=bool(mcp), citation_count=citation_count))
                 else:
                     checks.append(_check_result("mcp_context", "passed", query=args.query, has_result=bool(mcp)))
             except SourceBriefCliError as exc:
@@ -1597,10 +1659,17 @@ def _agent_pack_manifest_checks(manifest: dict[str, Any]) -> list[dict[str, Any]
     )
     raw_security_policy = manifest.get("security_policy")
     security_policy = raw_security_policy if isinstance(raw_security_policy, dict) else {}
+    security_ok = (
+        security_policy.get("requires_runtime_auth") is True
+        and security_policy.get("supports_revocation") is True
+        and security_policy.get("plaintext_tokens_allowed") is False
+        and security_policy.get("server_side_local_apply_allowed") is False
+    )
     checks.append(
         _agent_pack_check(
             "security_policy",
-            "passed" if security_policy.get("plaintext_tokens_allowed") is False and security_policy.get("server_side_local_apply_allowed") is False else "failed",
+            "passed" if security_ok else "failed",
+            requires_runtime_auth=security_policy.get("requires_runtime_auth"),
             plaintext_tokens_allowed=security_policy.get("plaintext_tokens_allowed"),
             server_side_local_apply_allowed=security_policy.get("server_side_local_apply_allowed"),
             supports_revocation=security_policy.get("supports_revocation"),
@@ -1608,14 +1677,16 @@ def _agent_pack_manifest_checks(manifest: dict[str, Any]) -> list[dict[str, Any]
     )
     raw_cache_policy = manifest.get("cache_policy")
     cache_policy = raw_cache_policy if isinstance(raw_cache_policy, dict) else {}
+    cache_ok = (
+        cache_policy.get("mode") == "none"
+        and cache_policy.get("pinned_snapshot") is False
+        and cache_policy.get("full_resource_sync_default") is False
+        and cache_policy.get("local_mirror") is False
+    )
     checks.append(
         _agent_pack_check(
             "cache_policy",
-            "passed"
-            if cache_policy.get("mode") in {"none", None}
-            and cache_policy.get("full_resource_sync_default") is not True
-            and cache_policy.get("local_mirror") is not True
-            else "failed",
+            "passed" if cache_ok else "failed",
             mode=cache_policy.get("mode"),
             pinned_snapshot=cache_policy.get("pinned_snapshot"),
             local_mirror=cache_policy.get("local_mirror"),
@@ -1632,8 +1703,8 @@ def _agent_pack_manifest_checks(manifest: dict[str, Any]) -> list[dict[str, Any]
         _agent_pack_check(
             "runtime_tools",
             "passed" if "sourcebrief.get_agent_context" in required else "warning",
-            mcp_required=required,
-            mcp_optional=optional,
+            mcp_required=_redact_manifest_value(required),
+            mcp_optional=_redact_manifest_value(optional),
             message=None if "sourcebrief.get_agent_context" in required else "manifest does not declare sourcebrief.get_agent_context as required",
         )
     )
@@ -1660,6 +1731,7 @@ def cmd_agent_pack_doctor(client: SourceBriefClient, args: argparse.Namespace) -
             args.workspace_id = str(manifest.get("workspace_id"))
         if not args.project_id and manifest.get("project_id"):
             args.project_id = str(manifest.get("project_id"))
+        args.require_citations = True
         remote_result = cmd_doctor(client, args)
         for check in remote_result.get("checks", []):
             if isinstance(check, dict):

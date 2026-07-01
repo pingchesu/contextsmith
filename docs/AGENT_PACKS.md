@@ -167,7 +167,7 @@ sourcebrief agent-pack doctor \
   --query "What does this project contain?"
 ```
 
-`agent-pack doctor` validates package integrity and manifest policy locally. When `--query` is provided, it also runs the existing remote SourceBrief/MCP context smoke path so operators can prove the installed runtime has live cited evidence.
+`agent-pack doctor` validates package integrity and manifest policy locally. Package-only validation does not contact SourceBrief or write local runtime config. When `--query` is provided, it also runs the existing remote SourceBrief/MCP context smoke path so operators can prove the installed runtime has live cited evidence; that live query may be recorded in SourceBrief's normal query/audit telemetry.
 
 Future CLI surfaces may add lifecycle commands around that validated package model:
 

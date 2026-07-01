@@ -248,6 +248,20 @@ class FakeClient:
             return [{"id": "tok-1", "name": "Hermes", "scopes": ["project:query"]}]
         if method == "DELETE" and path == "/workspaces/ws-1/api-tokens/tok-1":
             return {"id": "tok-1", "revoked_at": "2026-01-01T00:00:00Z"}
+        if method == "POST" and path == "/mcp/ws-1/proj-1":
+            payload = {
+                "query": (body or {}).get("params", {}).get("arguments", {}).get("query", "demo"),
+                "citations": [{"resource_id": "res-1", "path": "runbooks/payment-retry.md", "content_hash": "hash-1"}],
+                "answer": {"text": "Use the cited runbook. [1]", "citations_used": [{"label": "[1]", "path": "runbooks/payment-retry.md"}]},
+            }
+            return {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(payload)}],
+                    "structuredContent": payload,
+                },
+            }
         if method == "POST" and path.endswith("/restore"):
             return {"id": "res-1", "status": "active", "retrieval_enabled": True}
         if method == "POST" and path.endswith("/purge"):
@@ -2482,3 +2496,83 @@ def test_agent_pack_doctor_fails_unsafe_local_payload_policy(capsys, tmp_path):
     assert data["status"] == "failed"
     local_payload_check = next(check for check in data["checks"] if check["name"] == "local_payload")
     assert local_payload_check["status"] == "failed"
+
+
+def test_agent_pack_doctor_uses_saved_scope_defaults_for_remote_smoke(monkeypatch, capsys, tmp_path):
+    patch_client(monkeypatch)
+    config_path = tmp_path / "sourcebrief-config.json"
+    monkeypatch.setenv("SOURCEBRIEF_CONFIG_PATH", str(config_path))
+    config_path.write_text(json.dumps({"workspace_id": "ws-1", "project_id": "proj-1"}), encoding="utf-8")
+    package = _agent_pack_package(tmp_path)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package), "--query", "hello runtime"]) == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "passed"
+    assert "remote_mcp_context" in [check["name"] for check in data["checks"]]
+    assert any(call[1] == "/mcp/ws-1/proj-1" for call in FakeClient.instances[-1].calls)
+
+
+def test_agent_pack_doctor_remote_smoke_requires_citations(monkeypatch, capsys, tmp_path):
+    patch_client(monkeypatch)
+    package = _agent_pack_package(tmp_path)
+    original_request = FakeClient.request
+
+    def fake_request(self, method, path, *, body=None, expected=None):
+        if path == "/mcp/ws-1/proj-1":
+            return {"jsonrpc": "2.0", "id": 1, "result": {"content": [], "structuredContent": {"citations": [], "answer": {"citations_used": []}}}}
+        return original_request(self, method, path, body=body, expected=expected)
+
+    monkeypatch.setattr(FakeClient, "request", fake_request)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package), "--workspace-id", "ws-1", "--project-id", "proj-1", "--query", "hello runtime"]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    remote_mcp = next(check for check in data["checks"] if check["name"] == "remote_mcp_context")
+    assert remote_mcp["status"] == "failed"
+    assert remote_mcp["citation_count"] == 0
+
+
+def test_agent_pack_doctor_fails_unsafe_or_unknown_security_and_cache_policy(capsys, tmp_path):
+    package = _agent_pack_package(
+        tmp_path,
+        manifest_overrides={
+            "security_policy": {"requires_runtime_auth": False, "supports_revocation": False, "plaintext_tokens_allowed": False, "server_side_local_apply_allowed": False},
+            "cache_policy": {},
+        },
+    )
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "security_policy")["status"] == "failed"
+    assert next(check for check in data["checks"] if check["name"] == "cache_policy")["status"] == "failed"
+
+
+def test_agent_pack_doctor_redacts_secret_like_manifest_tool_values(capsys, tmp_path):
+    secret = "cs_secretvalue123456789"
+    package = _agent_pack_package(
+        tmp_path,
+        manifest_overrides={"runtime_tools": {"mcp_required": ["sourcebrief.get_agent_context"], "mcp_optional": [secret]}},
+    )
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    output = capsys.readouterr().out
+    data = json.loads(output)
+
+    assert secret not in output
+    runtime_tools = next(check for check in data["checks"] if check["name"] == "runtime_tools")
+    assert runtime_tools["mcp_optional"] == ["[redacted-secret-like-value]"]
+
+
+def test_agent_pack_doctor_package_only_does_not_env_login(monkeypatch, capsys, tmp_path):
+    patch_client(monkeypatch)
+    monkeypatch.setenv("SOURCEBRIEF_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("SOURCEBRIEF_ADMIN_PASSWORD", "pw")
+    package = _agent_pack_package(tmp_path)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    json.loads(capsys.readouterr().out)
+    assert FakeClient.instances[-1].calls == []
