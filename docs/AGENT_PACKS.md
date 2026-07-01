@@ -170,6 +170,14 @@ For explicit `pinned-snapshot` packages, the mode-specific fields must look like
 {
   "mode": "pinned-snapshot",
   "requires_sourcebrief_remote": true,
+  "runtime_access": {
+    "mode": "pinned-snapshot",
+    "requires_sourcebrief_remote": true,
+    "local_repo_required": false,
+    "local_grep_allowed": false,
+    "local_edits_allowed": false,
+    "current_claims_require_remote": true
+  },
   "local_payload": {
     "contains_full_resource": false,
     "contains_raw_source": false,

@@ -2849,10 +2849,13 @@ def test_agent_pack_doctor_rejects_pinned_snapshot_loose_snapshot_age(capsys, tm
     assert next(check for check in data["checks"] if check["name"] == "cache_policy")["status"] == "failed"
 
 
-def test_agent_pack_docs_representative_remote_live_manifest_passes_doctor(capsys, tmp_path):
+def _agent_pack_docs_json_blocks() -> list[dict[str, Any]]:
     docs = (Path(__file__).resolve().parents[2] / "docs" / "AGENT_PACKS.md").read_text(encoding="utf-8")
-    manifest_json = re.findall(r"```json\n(.*?)\n```", docs, re.S)[0]
-    manifest = json.loads(manifest_json)
+    return [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", docs, re.S)]
+
+
+def test_agent_pack_docs_representative_remote_live_manifest_passes_doctor(capsys, tmp_path):
+    manifest = _agent_pack_docs_json_blocks()[0]
     package = _agent_pack_package(tmp_path, manifest_overrides=manifest)
 
     assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
@@ -2860,3 +2863,14 @@ def test_agent_pack_docs_representative_remote_live_manifest_passes_doctor(capsy
 
     assert data["status"] == "passed"
     assert data["package"]["mode"] == "remote-live"
+
+
+def test_agent_pack_docs_pinned_snapshot_manifest_passes_doctor(capsys, tmp_path):
+    manifest = _agent_pack_docs_json_blocks()[1]
+    package = _agent_pack_package(tmp_path, manifest_overrides=manifest)
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "passed"
+    assert data["package"]["mode"] == "pinned-snapshot"
