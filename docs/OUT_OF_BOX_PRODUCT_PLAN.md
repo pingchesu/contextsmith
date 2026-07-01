@@ -77,9 +77,9 @@ What not to reuse blindly:
 SourceBrief should present four surfaces:
 
 1. **Web console** — human onboarding, source import, Workbench citations, review, and runtime install guidance.
-2. **CLI** — bootstrap, automation, doctor, runtime setup, skill export/install, and CI fallback. Recipe commands are a future wrapper over existing source import and ask flows.
+2. **CLI** — bootstrap, automation, doctor, runtime setup, Agent Pack / Skill Export validation, and CI fallback. Recipe commands are a future wrapper over existing source import and ask flows.
 3. **MCP/API** — cited runtime evidence for agents.
-4. **Agent pack** — generated project instructions plus local install receipt and rollback.
+4. **Agent Pack** — thin runtime adapter over a Repo/Project Agent; `remote-live` by default, with explicit `pinned-snapshot` / `local-mirror` policy validation only when declared.
 
 ## Golden-path UX
 
@@ -196,15 +196,15 @@ Acceptance:
 
 Scope:
 
-- Add a higher-level wrapper over runtime setup + skill export/install.
+- Add a higher-level wrapper over runtime setup + Agent Pack / Skill Export validation and local apply.
 - Keep `--dry-run` as default and require explicit `--apply` for local mutation.
 - Print receipt, rollback, validation, and MCP smoke instructions.
 
 Acceptance:
 
-- Hermes path proves skill installed and MCP ask returns citations.
+- Hermes path proves Agent Pack / Skill Export loaded and MCP ask returns citations.
 - Missing MCP config or token scope failures produce repair guidance.
-- Generated skill contains no raw corpus or plaintext tokens.
+- Generated adapter contains no raw corpus or plaintext tokens.
 
 ### M5 — Web onboarding wizard
 

@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-06-30
+Updated: 2026-07-01
 
 SourceBrief is an early alpha for local development and product exploration. The core context path works locally; public internet hardening and enterprise deployment are not ready yet.
 
@@ -35,6 +35,8 @@ SourceBrief is an early alpha for local development and product exploration. The
 - CLI for workspace/project/resource/search/context/token operations.
 - Hermes integration validator for scoped context access.
 - Runtime install-plan, validation, guarded apply, rollback receipt, and doctor flows for Hermes and MCP-style agent setup.
+- Agent Pack install model: Repo/Project Agents publish runtime views; Agent Packs / Skill Exports install thin adapters by default; `agent-pack doctor` validates package integrity and manifest policy locally, with optional citation smoke via `--query`.
+- Manifest-mode validation for `remote-live`, bounded `pinned-snapshot`, and exceptional `local-mirror` policy declarations. `remote-live` remains the generated/default mode.
 
 ### Review and operations
 
@@ -53,7 +55,7 @@ SourceBrief is an early alpha for local development and product exploration. The
 - Workbench for scoped questions and cited context.
 - Quality/review surfaces.
 - Self-improvement page for artifact history, redacted artifact detail, MVP smoke, and sleep dry-run.
-- Graph, graph merge, repo agent, agent profile, and Skill Export surfaces.
+- Graph, graph merge, repo agent, agent profile, Skill Export, and Agent Pack publish/install/validate surfaces.
 - Product walkthrough screenshots, GIF, and proof artifact manifest for local alpha demos.
 
 ### Quality/release gate
@@ -70,7 +72,7 @@ SourceBrief is an early alpha for local development and product exploration. The
 - Folder-bundle partial update UX.
 - Large-repo progress UI, skipped-file reports, cancel/retry controls, and indexing explainability.
 - Graph merge hardening for enterprise cross-repo workflows.
-- Skill Pack generation quality and real-world package evaluation.
+- Agent Pack / Skill Export generation quality and real-world package evaluation.
 - Self-improvement remains artifact-first and review-gated; recurring sleep/replay mining is dry-run only until explicit adoption workflows mature.
 
 ## Not alpha-ready / non-goals today
