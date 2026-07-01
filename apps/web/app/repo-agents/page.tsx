@@ -21,13 +21,13 @@ const RUNTIME_STEPS = [
   ['Validate Runtime', 'Run agent-pack doctor with a cited smoke query before trusting runtime answers.'],
 ];
 
-function quoteCli(value: string) {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+function quoteShellArg(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function workspaceProjectHint(workspaceName: string | null | undefined, projectName: string | null | undefined) {
-  const workspaceFlag = workspaceName ? `--workspace ${quoteCli(workspaceName)}` : '--workspace "<workspace>"';
-  const projectFlag = projectName ? `--project ${quoteCli(projectName)}` : '--project "<project>"';
+  const workspaceFlag = workspaceName ? `--workspace ${quoteShellArg(workspaceName)}` : "--workspace '<workspace>'";
+  const projectFlag = projectName ? `--project ${quoteShellArg(projectName)}` : "--project '<project>'";
   return `${workspaceFlag} ${projectFlag}`;
 }
 
