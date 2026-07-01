@@ -2576,3 +2576,63 @@ def test_agent_pack_doctor_package_only_does_not_env_login(monkeypatch, capsys, 
     assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
     json.loads(capsys.readouterr().out)
     assert FakeClient.instances[-1].calls == []
+
+
+def test_agent_pack_doctor_package_only_ignores_named_scope_without_api_calls(monkeypatch, capsys, tmp_path):
+    patch_client(monkeypatch)
+    package = _agent_pack_package(tmp_path)
+
+    assert cli_main([
+        "--json",
+        "agent-pack",
+        "doctor",
+        "--package",
+        str(package),
+        "--workspace",
+        "Demo Workspace",
+        "--project",
+        "Demo Project",
+    ]) == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "passed"
+    assert data["remote_smoke"] is None
+    assert FakeClient.instances[-1].calls == []
+
+
+def test_agent_pack_doctor_redacts_github_token_values_and_secret_like_keys(capsys, tmp_path):
+    gh_token = "ghp_" + "x" * 24
+    key_secret = "cs_secretvalue123456789"
+    package = _agent_pack_package(
+        tmp_path,
+        manifest_overrides={
+            "runtime_tools": {
+                "mcp_required": ["sourcebrief.get_agent_context", {key_secret: "sourcebrief.search"}],
+                "mcp_optional": [gh_token],
+            }
+        },
+    )
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 0
+    output = capsys.readouterr().out
+    data = json.loads(output)
+
+    assert gh_token not in output
+    assert key_secret not in output
+    runtime_tools = next(check for check in data["checks"] if check["name"] == "runtime_tools")
+    assert runtime_tools["mcp_optional"] == ["[redacted-secret-like-value]"]
+    assert runtime_tools["mcp_required"][1] == {"[redacted-secret-like-key]": "sourcebrief.search"}
+
+
+def test_agent_pack_doctor_fails_missing_required_remote_context_tool(capsys, tmp_path):
+    package = _agent_pack_package(
+        tmp_path,
+        manifest_overrides={"runtime_tools": {"mcp_required": [], "mcp_optional": ["sourcebrief.search"]}},
+    )
+
+    assert cli_main(["--json", "agent-pack", "doctor", "--package", str(package)]) == 1
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["status"] == "failed"
+    runtime_tools = next(check for check in data["checks"] if check["name"] == "runtime_tools")
+    assert runtime_tools["status"] == "failed"

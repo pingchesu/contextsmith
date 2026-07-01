@@ -359,6 +359,10 @@ def _login_with_password(client: SourceBriefClient, email: str, password: str) -
     return session_token
 
 
+def _agent_pack_doctor_package_only(args: argparse.Namespace) -> bool:
+    return args.command == "agent-pack" and getattr(args, "agent_pack_command", None) == "doctor" and not getattr(args, "query", None)
+
+
 def _command_uses_authenticated_api(args: argparse.Namespace) -> bool:
     if args.command == "use":
         return bool(getattr(args, "workspace", None) or getattr(args, "project", None))
@@ -366,7 +370,7 @@ def _command_uses_authenticated_api(args: argparse.Namespace) -> bool:
         return False
     if args.command == "runtime" and getattr(args, "runtime_command", None) in {"detect", "apply", "rollback", "validate"}:
         return False
-    if args.command == "agent-pack" and getattr(args, "agent_pack_command", None) == "doctor" and not getattr(args, "query", None):
+    if _agent_pack_doctor_package_only(args):
         return False
     return True
 
@@ -623,7 +627,22 @@ def _mcp_citation_count(response: Any) -> int:
     return 0
 
 
-SECRET_LIKE_RE = re.compile(r"(?i)(?:\bcs_[a-z0-9_\-]{8,}\b|\b(?:sourcebrief|contextsmith)[-_]?(?:token|key|secret)[-_]?[a-z0-9_\-]{4,}\b|\bsk-[a-z0-9_\-]{8,}\b)")
+SECRET_LIKE_RE = re.compile(
+    r"(?i)(?:"
+    r"\bcs_[a-z0-9_\-]{8,}\b|"
+    r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{8,}\b|"
+    r"\bgithub_pat_[A-Za-z0-9_]{8,}\b|"
+    r"\bglpat-[A-Za-z0-9_\-]{8,}\b|"
+    r"\bxox[baprs]-[A-Za-z0-9_\-]{8,}\b|"
+    r"\b(?:sourcebrief|contextsmith)[-_]?(?:token|key|secret)[-_]?[a-z0-9_\-]{4,}\b|"
+    r"\bsk-[a-z0-9_\-]{8,}\b"
+    r")"
+)
+
+
+def _redact_manifest_key(key: Any) -> str:
+    text = str(key)
+    return "[redacted-secret-like-key]" if SECRET_LIKE_RE.search(text) else text
 
 
 def _redact_manifest_value(value: Any) -> Any:
@@ -632,7 +651,7 @@ def _redact_manifest_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_manifest_value(item) for item in value]
     if isinstance(value, dict):
-        return {str(key): _redact_manifest_value(item) for key, item in value.items()}
+        return {_redact_manifest_key(key): _redact_manifest_value(item) for key, item in value.items()}
     return value
 
 
@@ -1702,7 +1721,7 @@ def _agent_pack_manifest_checks(manifest: dict[str, Any]) -> list[dict[str, Any]
     checks.append(
         _agent_pack_check(
             "runtime_tools",
-            "passed" if "sourcebrief.get_agent_context" in required else "warning",
+            "passed" if "sourcebrief.get_agent_context" in required else "failed",
             mcp_required=_redact_manifest_value(required),
             mcp_optional=_redact_manifest_value(optional),
             message=None if "sourcebrief.get_agent_context" in required else "manifest does not declare sourcebrief.get_agent_context as required",
@@ -2380,7 +2399,8 @@ def main(argv: list[str] | None = None) -> int:
     client = SourceBriefClient(args.api_url, args.email, token=args.token)
     try:
         _maybe_session_login(client, args)
-        _resolve_named_scope(client, args, getattr(args, "_sourcebrief_config", {}) or {})
+        if not _agent_pack_doctor_package_only(args):
+            _resolve_named_scope(client, args, getattr(args, "_sourcebrief_config", {}) or {})
         data = args.func(client, args)
     except (SourceBriefCliError, runtime_apply.RuntimeApplyError, skill_install.SkillInstallError, RegressionProposalError) as exc:
         print(f"sourcebrief: error: {exc}", file=sys.stderr)
